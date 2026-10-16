@@ -1,0 +1,92 @@
+"""Catalog models: categories, units of measure, products, price lists."""
+from datetime import date
+from decimal import Decimal
+
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.security import new_id
+from app.db.base import Base, CreatedByMixin, TimestampMixin
+
+
+class Category(Base, TimestampMixin, CreatedByMixin):
+    __tablename__ = "categories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("categories.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+
+class UnitOfMeasure(Base, TimestampMixin):
+    __tablename__ = "units_of_measure"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(16), nullable=False)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_uom_company_code"),)
+
+
+class UnitConversion(Base, TimestampMixin):
+    """Explicit, validated conversion rule between two UoMs; never implied."""
+    __tablename__ = "unit_conversions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    from_uom_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    to_uom_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    factor: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)  # qty_to = qty_from * factor
+
+    __table_args__ = (UniqueConstraint("company_id", "from_uom_id", "to_uom_id", name="uq_unit_conversion_pair"),)
+
+
+class Product(Base, TimestampMixin, CreatedByMixin):
+    __tablename__ = "products"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    sku: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("categories.id"), nullable=True)
+    uom_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("units_of_measure.id"), nullable=True)
+    barcode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # stock_type: stock | service | non_inventory
+    stock_type: Mapped[str] = mapped_column(String(16), nullable=False, default="stock")
+    track_batches: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    track_serials: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # base selling/cost prices (default price list rows may override by date)
+    base_cost: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
+    base_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
+    default_tax_rate_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    image_file_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_sellable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_purchasable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
+
+
+class PriceList(Base, TimestampMixin, CreatedByMixin):
+    __tablename__ = "price_lists"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class PriceListItem(Base, TimestampMixin):
+    """Price rows with an effective date range. When multiple rows apply,
+    the row with the latest effective_from wins."""
+    __tablename__ = "price_list_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    price_list_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)

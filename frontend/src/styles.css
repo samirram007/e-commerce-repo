@@ -1,0 +1,177 @@
+@import "tailwindcss";
+
+:root {
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f6f8;
+  color: #1c2333;
+}
+
+a { color: inherit; }
+
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 220px;
+  background: #10192e;
+  color: #dbe2f1;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.sidebar .brand {
+  font-weight: 700;
+  font-size: 18px;
+  margin: 6px 0 18px;
+  color: #fff;
+}
+
+.sidebar a {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  text-decoration: none;
+  color: #aeb8cf;
+  font-size: 14px;
+}
+
+.sidebar a.active, .sidebar a:hover { background: #1d2b4d; color: #fff; }
+
+.content {
+  flex: 1;
+  padding: 24px 32px;
+  max-width: 1200px;
+}
+
+.page-title { font-size: 22px; font-weight: 700; margin: 0 0 16px; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e3e7ef;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+  overflow: auto;
+}
+
+table.data { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.data th, table.data td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef1f6; }
+table.data th { color: #5a6478; font-weight: 600; background: #fafbfd; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #eef2ff;
+  color: #3b4bc8;
+}
+.badge.warn { background: #fff4e0; color: #a05c00; }
+.badge.ok { background: #e2f7e9; color: #157347; }
+.badge.bad { background: #fde5e5; color: #b02a2a; }
+
+button, .btn {
+  background: #2f54eb;
+  border: none;
+  color: #fff;
+  padding: 8px 14px;
+  font-size: 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+button.secondary { background: #e6eaf5; color: #1c2333; }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+input, select, textarea {
+  padding: 8px 10px;
+  border: 1px solid #d4d9e6;
+  border-radius: 8px;
+  font-size: 14px;
+  width: 100%;
+}
+
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 13px; color: #5a6478; margin-bottom: 4px; }
+.form-row { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.form-row > * { flex: 1 1 140px; }
+
+.error-text { color: #b02a2a; font-size: 14px; }
+.muted { color: #5a6478; font-size: 13px; }
+
+.kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.kpi { background: #fff; border: 1px solid #e3e7ef; border-radius: 12px; padding: 14px 20px; min-width: 170px; }
+.kpi .value { font-size: 24px; font-weight: 700; }
+.kpi .label { font-size: 12px; color: #5a6478; }
+
+.login-wrap { max-width: 420px; margin: 12vh auto; }
+.guest-shell { min-height: 100vh; padding: 1px 16px 40px; }
+
+/* ---- layout helpers ---- */
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
+.card-title { font-weight: 600; }
+.table-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.subtle { font-size: 12px; color: #5a6478; }
+
+/* ---- buttons: extra variants ---- */
+button.danger { background: #d93025; color: #fff; }
+button.ghost { background: transparent; color: #2f54eb; padding: 4px 6px; }
+
+/* ---- states ---- */
+.empty { text-align: center; padding: 28px 12px; color: #5a6478; }
+.empty-title { font-weight: 600; margin-bottom: 4px; }
+.error-banner { background: #fde5e5; color: #b02a2a; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+
+/* ---- tabs ---- */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid #e3e7ef; margin-bottom: 14px; flex-wrap: wrap; }
+.tab { background: transparent; color: #5a6478; border-radius: 8px 8px 0 0; padding: 8px 12px; }
+.tab.active { background: #eef2ff; color: #2f54eb; font-weight: 600; }
+
+/* ---- modal ---- */
+.modal-overlay { position: fixed; inset: 0; background: rgba(16, 25, 46, 0.45); display: flex; z-index: 50; align-items: center; justify-content: center; padding: 20px; }
+.modal { background: #fff; border-radius: 12px; width: min(560px, 100%); max-height: 90vh; display: flex; flex-direction: column; overflow: hidden; }
+.modal.wide { width: min(880px, 100%); }
+.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #eef1f6; }
+.modal-title { margin: 0; font-size: 18px; }
+.modal-body { padding: 18px; overflow: auto; }
+.modal-foot { padding: 12px 18px; border-top: 1px solid #eef1f6; display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---- sheet (slide-over; used for every searchable picker) ---- */
+.sheet-overlay { position: fixed; inset: 0; background: rgba(16, 25, 46, 0.45); display: flex; justify-content: flex-end; z-index: 60; }
+.sheet { background: #fff; width: min(460px, 100%); height: 100%; display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(16, 25, 46, 0.18); }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid #eef1f6; }
+.sheet-foot { padding: 12px 18px; border-top: 1px solid #eef1f6; display: flex; justify-content: flex-end; gap: 8px; }
+.sheet-search { padding: 12px 18px; border-bottom: 1px solid #eef1f6; }
+.sheet-list { overflow: auto; flex: 1; padding: 6px; }
+.sheet-option { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; background: transparent; color: #1c2333; padding: 10px 12px; border-radius: 8px; }
+.sheet-option:hover { background: #f2f5fb; }
+.sheet-option.selected { background: #eef2ff; color: #2f54eb; font-weight: 600; }
+.sheet-select { display: flex; flex-direction: column; }
+.sheet-trigger { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; background: #fff; color: #1c2333; border: 1px solid #d4d9e6; font-weight: 400; text-align: left; }
+.sheet-trigger .placeholder { color: #8b93a7; }
+.sheet-trigger .chevron { color: #8b93a7; }
