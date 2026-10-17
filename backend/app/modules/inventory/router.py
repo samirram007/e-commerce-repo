@@ -215,6 +215,46 @@ def valuation(ctx: CompanyCtx = Depends(guard(P_INVENTORY_VIEW)), session: Sessi
     return svc.stock_valuation_report(session, ctx.company_id)
 
 
+@router.get("/serials")
+def serials(
+    product_id: str | None = None,
+    location_id: str | None = None,
+    status: str | None = None,
+    batch_ref: str | None = None,
+    search: str | None = None,
+    limit: int = 500,
+    ctx: CompanyCtx = Depends(guard(P_INVENTORY_VIEW)),
+    session: Session = Depends(get_db),
+):
+    rows = svc.serials_view(
+        session,
+        ctx.company_id,
+        product_id=product_id,
+        location_id=location_id,
+        status=status,
+        batch_ref=batch_ref,
+        search=search,
+        limit=limit,
+    )
+    return [
+        {
+            "id": s.id,
+            "product_id": s.product_id,
+            "sku": sku,
+            "location_id": s.location_id,
+            "location_code": loc_code,
+            "batch_ref": s.batch_ref,
+            "serial_number": s.serial_number,
+            "status": s.status,
+            "source_type": s.source_type,
+            "source_id": s.source_id,
+            "created_at": s.created_at.isoformat(),
+            "issued_at": s.issued_at.isoformat() if s.issued_at else None,
+        }
+        for s, sku, loc_code in rows
+    ]
+
+
 @router.get("/reconcile")
 def reconcile(ctx: CompanyCtx = Depends(guard(P_INVENTORY_MANAGE)), session: Session = Depends(get_db)):
     ok = svc.reconcile_check(session, ctx.company_id)

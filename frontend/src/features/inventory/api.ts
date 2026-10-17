@@ -9,6 +9,7 @@ import {
   postCountResultSchema,
   productOptionListSchema,
   reconcileSchema,
+  serialListSchema,
   stockCountSchema,
   transferResultSchema,
   valuationListSchema,
@@ -20,6 +21,7 @@ import {
   type PostCountResult,
   type ProductOption,
   type Reconcile,
+  type SerialRow,
   type StockCount,
   type TransferPayload,
   type ValuationRow,
@@ -100,6 +102,25 @@ export async function fetchValuation(): Promise<ValuationRow[]> {
 export async function fetchReconcile(): Promise<Reconcile> {
   const { data } = await api.get("/inventory/reconcile");
   return reconcileSchema.parse(data);
+}
+
+export interface SerialFilters {
+  productId?: string;
+  locationId?: string;
+  status?: string;
+  search?: string;
+}
+
+export async function fetchSerials(filters: SerialFilters = {}): Promise<SerialRow[]> {
+  const { data } = await api.get("/inventory/serials", {
+    params: {
+      product_id: filters.productId || undefined,
+      location_id: filters.locationId || undefined,
+      status: filters.status || undefined,
+      search: filters.search || undefined,
+    },
+  });
+  return serialListSchema.parse(data);
 }
 
 // ---- shared pickers ----

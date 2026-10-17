@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { isStockableType } from "../../lib/location-types";
 import {
   Button,
   Card,
@@ -72,6 +73,7 @@ interface ReceiveDraft {
   remaining: string;
   qty_received: string;
   batch_ref: string;
+  serials: string;
 }
 
 export function PurchaseOrdersTab() {
@@ -116,6 +118,14 @@ export function PurchaseOrdersTab() {
     return map;
   }, [products.data]);
 
+  const serialTracked = useMemo(() => {
+    const set = new Set<string>();
+    for (const product of products.data ?? []) {
+      if (product.track_serials) set.add(product.id);
+    }
+    return set;
+  }, [products.data]);
+
   const vendorOptions = useMemo(
     () => (vendors.data ?? []).map((v) => ({ value: v.id, label: v.name, hint: v.code })),
     [vendors.data],
@@ -130,7 +140,7 @@ export function PurchaseOrdersTab() {
   const binOptions = useMemo(
     () =>
       (locations.data ?? [])
-        .filter((l) => l.location_type === "bin")
+        .filter((l) => isStockableType(l.location_type))
         .map((l) => ({ value: l.id, label: `${l.code} — ${l.name}` })),
     [locations.data],
   );
@@ -148,6 +158,7 @@ export function PurchaseOrdersTab() {
           remaining,
           qty_received: remaining,
           batch_ref: "",
+          serials: "",
         };
       }),
     );
@@ -226,6 +237,11 @@ export function PurchaseOrdersTab() {
       setReceiveErrors({ "lines.qty_received": "Enter a valid quantity" });
       return;
     }
+    const parseSerials = (value: string) =>
+      value
+        .split(/[\n,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
     const candidate = {
       location_id: receiveLocation,
       lines: receiveDraft
@@ -234,6 +250,7 @@ export function PurchaseOrdersTab() {
           order_line_id: line.order_line_id,
           qty_received: line.qty_received,
           batch_ref: line.batch_ref,
+          serials: line.serials,
         })),
     };
     const parsed = receiveFormSchema.safeParse(candidate);
@@ -241,13 +258,31 @@ export function PurchaseOrdersTab() {
       setReceiveErrors(fieldErrors(parsed.error));
       return;
     }
+    const errors: Record<string, string> = {};
+    const productIdByLine = new Map(receiveDraft.map((d) => [d.order_line_id, d.product_id]));
+    parsed.data.lines.forEach((line, index) => {
+      if (!serialTracked.has(productIdByLine.get(line.order_line_id) ?? "")) return;
+      const serials = parseSerials(line.serials ?? "");
+      if (serials.length !== Number(line.qty_received)) {
+        errors[`lines.${index}.serials`] =
+          `Enter ${line.qty_received} serial number(s) — one per unit`;
+      }
+    });
+    if (Object.keys(errors).length > 0) {
+      setReceiveErrors(errors);
+      return;
+    }
     setReceiveErrors({});
-    const lines: ReceiveLinePayload[] = parsed.data.lines.map((line) => ({
-      order_line_id: line.order_line_id,
-      qty_received: line.qty_received,
-      location_id: parsed.data.location_id,
-      batch_ref: line.batch_ref?.trim() ? line.batch_ref : undefined,
-    }));
+    const lines: ReceiveLinePayload[] = parsed.data.lines.map((line) => {
+      const serials = parseSerials(line.serials ?? "");
+      return {
+        order_line_id: line.order_line_id,
+        qty_received: line.qty_received,
+        location_id: parsed.data.location_id,
+        batch_ref: line.batch_ref?.trim() ? line.batch_ref : undefined,
+        serials: serials.length > 0 ? serials : undefined,
+      };
+    });
     receiveGoods.mutate(
       { id: receiveOrder.id, lines },
       { onSuccess: (posted) => setReceipt(posted) },
@@ -532,6 +567,25 @@ export function PurchaseOrdersTab() {
                     }
                   />
                 </Field>
+                {serialTracked.has(line.product_id) ? (
+                  <Field
+                    label="Serial numbers"
+                    hint="One per unit — separate with commas or new lines"
+                    error={receiveErrors[`lines.${index}.serials`]}
+                  >
+                    <Input
+                      value={line.serials}
+                      placeholder="SN-001, SN-002"
+                      onChange={(event) =>
+                        setReceiveDraft((prev) =>
+                          prev.map((draft, i) =>
+                            i === index ? { ...draft, serials: event.target.value } : draft,
+                          ),
+                        )
+                      }
+                    />
+                  </Field>
+                ) : null}
               </div>
             ))}
           </>

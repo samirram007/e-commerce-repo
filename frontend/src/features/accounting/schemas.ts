@@ -40,6 +40,8 @@ export const journalEntrySchema = z.object({
   id: z.string(),
   doc_number: z.string(),
   entry_date: z.string(),
+  /** Fiscal year the entry posted to (snapshot; null for legacy rows). */
+  fiscal_year_id: z.string().nullable().default(null),
   description: z.string().nullable(),
   status: z.string(),
   source_type: z.string(),

@@ -50,8 +50,9 @@ a { color: inherit; }
 
 .content {
   flex: 1;
+  min-width: 0;
+  width: 100%;
   padding: 24px 32px;
-  max-width: 1200px;
 }
 
 .page-title { font-size: 22px; font-weight: 700; margin: 0 0 16px; }
@@ -65,6 +66,10 @@ a { color: inherit; }
   gap: 10px;
 }
 
+.topbar-filters { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+.fiscal-year-switcher { min-width: 200px; }
+.company-switcher { min-width: 180px; }
+
 .card {
   background: #fff;
   border: 1px solid #e3e7ef;
@@ -77,6 +82,31 @@ a { color: inherit; }
 table.data { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.data th, table.data td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef1f6; }
 table.data th { color: #5a6478; font-weight: 600; background: #fafbfd; }
+
+/* Server-side DataTable: sortable headers + pagination footer */
+button.th-sort {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+button.th-sort .sort-ind { font-size: 10px; color: #9aa4b8; }
+button.th-sort.active .sort-ind { color: #2f54eb; }
+.table-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 2px 0;
+  font-size: 13px;
+}
 
 .badge {
   display: inline-block;
@@ -175,3 +205,74 @@ button.ghost { background: transparent; color: #2f54eb; padding: 4px 6px; }
 .sheet-trigger { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; background: #fff; color: #1c2333; border: 1px solid #d4d9e6; font-weight: 400; text-align: left; }
 .sheet-trigger .placeholder { color: #8b93a7; }
 .sheet-trigger .chevron { color: #8b93a7; }
+
+/* ---- profile dropdown (topbar account menu) ---- */
+.profile-menu { position: relative; }
+.profile-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  color: #1c2333;
+  border: 1px solid #d4d9e6;
+  border-radius: 999px;
+  padding: 4px 12px 4px 4px;
+  font-weight: 400;
+}
+.profile-trigger:hover, .profile-trigger.open { background: #f2f5fb; }
+.profile-trigger .chevron { color: #8b93a7; font-size: 11px; }
+.profile-trigger-text { display: flex; flex-direction: column; line-height: 1.2; text-align: left; min-width: 0; }
+.profile-trigger-text .profile-name { font-size: 13px; font-weight: 600; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-trigger-text .muted { font-size: 11px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #2f54eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.avatar.lg { width: 40px; height: 40px; font-size: 14px; }
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 268px;
+  background: #fff;
+  border: 1px solid #e3e7ef;
+  border-radius: 12px;
+  padding: 6px;
+  z-index: 40;
+  box-shadow: 0 12px 28px rgba(16, 25, 46, 0.16);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.menu-header { display: flex; gap: 10px; align-items: flex-start; padding: 10px; }
+.menu-header-text { min-width: 0; }
+.menu-name { font-weight: 600; font-size: 14px; }
+.menu-header-text .muted { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-roles { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.menu-roles .badge { font-size: 10px; padding: 1px 8px; }
+.menu-divider { height: 1px; background: #eef1f6; margin: 4px 2px; }
+.menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #1c2333;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 400;
+}
+.menu-item:hover { background: #f2f5fb; }
+.menu-danger { color: #b02a2a; }
+.menu-danger:hover { background: #fde5e5; }

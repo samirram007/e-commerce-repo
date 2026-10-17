@@ -16,7 +16,10 @@ from app.core.config import get_settings  # noqa: E402
 
 settings = get_settings()
 db_url = os.environ.get("ALEMBIC_DATABASE_URL", settings.database_url)
-config.set_main_option("sqlalchemy.url", db_url)
+# Alembic stores the URL in a ConfigParser option, where '%' starts an
+# interpolation token. Percent-encoded passwords (e.g. '%40') must be escaped
+# as '%%40'; ConfigParser un-escapes it again on read.
+config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 from app.db import base_all  # noqa: E402,F401  (imports all models)
 

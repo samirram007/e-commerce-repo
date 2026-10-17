@@ -142,7 +142,7 @@ def receive_goods(
     if not lines:
         raise BusinessRuleError("NO_LINES", "Receipt needs at least one line")
 
-    receipt_lines_payload: list[tuple[PurchaseOrderLine, Decimal, str, str | None, object | None]] = []
+    receipt_lines_payload: list[tuple[PurchaseOrderLine, Decimal, str, str | None, object | None, list[str] | None]] = []
     for payload in lines:
         po_line = session.get(PurchaseOrderLine, payload["order_line_id"])
         if po_line is None or po_line.order_id != order.id:
@@ -157,10 +157,12 @@ def receive_goods(
                 f"Line {po_line.line_number}: receiving {qty} exceeds remaining {remaining}",
             )
         location = storage_svc.get_location(session, company_id, payload["location_id"])
-        if location.location_type != "bin":
+        if location.location_type not in storage_svc.STOCKABLE_TYPES:
             raise BusinessRuleError("BIN_REQUIRED", "Goods receipts must target bin-level locations")
+        raw_serials = payload.get("serials") or []
+        serials = [s.strip() for s in raw_serials if s and str(s).strip()] or None
         receipt_lines_payload.append(
-            (po_line, qty, location.id, payload.get("batch_ref"), payload.get("expiry_date"))
+            (po_line, qty, location.id, payload.get("batch_ref"), payload.get("expiry_date"), serials)
         )
 
     doc_number = allocate_number(session, company_id, "goods_receipt")
@@ -177,7 +179,7 @@ def receive_goods(
     session.flush()
 
     all_received = True
-    for po_line, qty, location_id, batch_ref, expiry in receipt_lines_payload:
+    for po_line, qty, location_id, batch_ref, expiry, serials in receipt_lines_payload:
         grl = GoodsReceiptLine(
             receipt_id=receipt.id,
             order_line_id=po_line.id,
@@ -200,6 +202,7 @@ def receive_goods(
             unit_cost=po_line.unit_cost,
             batch_ref=batch_ref,
             expiry_date=expiry,
+            serials=serials,
             source_type="goods_receipt",
             source_id=receipt.id,
             source_line_id=grl.id,

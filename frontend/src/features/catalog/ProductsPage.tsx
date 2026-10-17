@@ -13,15 +13,21 @@ import {
   PageHeader,
   type Column,
 } from "../../components/ui";
-import { SheetSelect } from "../../components/sheet";
+import { Sheet, SheetSelect } from "../../components/sheet";
 import { usePermissions } from "../../hooks/use-permissions";
-import { formatMoney, titleCase } from "../../lib/format";
+import { formatMoney, formatQty, titleCase } from "../../lib/format";
 import { fieldErrors } from "../../lib/zod-utils";
+import {
+  locationOptionsQueryOptions,
+  onHandQueryOptions,
+} from "../inventory/queries";
+import type { OnHandRow } from "../inventory/schemas";
 import {
   categoriesQueryOptions,
   productsQueryOptions,
   uomsQueryOptions,
   useCreateProduct,
+  useUpdateProduct,
 } from "./queries";
 import { productFormSchema, STOCK_TYPES, type Product, type ProductFormInput } from "./schemas";
 
@@ -33,6 +39,8 @@ const EMPTY_FORM: ProductFormInput = {
   uom_id: null,
   barcode: "",
   stock_type: "stock",
+  track_batches: false,
+  track_serials: false,
   base_cost: "0",
   base_price: "0",
   is_sellable: true,
@@ -40,15 +48,38 @@ const EMPTY_FORM: ProductFormInput = {
   is_active: true,
 };
 
+function formFromProduct(product: Product): ProductFormInput {
+  return {
+    sku: product.sku,
+    name: product.name,
+    description: product.description ?? "",
+    category_id: product.category_id,
+    uom_id: product.uom_id,
+    barcode: product.barcode ?? "",
+    stock_type: product.stock_type as ProductFormInput["stock_type"],
+    track_batches: product.track_batches,
+    track_serials: product.track_serials,
+    base_cost: product.base_cost,
+    base_price: product.base_price,
+    is_sellable: product.is_sellable,
+    is_purchasable: product.is_purchasable,
+    is_active: product.is_active,
+  };
+}
+
 export function ProductsPage() {
   const { has } = usePermissions();
   const canManage = has("catalog.manage");
+  const canViewStock = has("inventory.view");
 
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductFormInput>(EMPTY_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  // Stock-on-hand detail for one product (inventory.view only).
+  const [stockFor, setStockFor] = useState<Product | null>(null);
 
   const products = useQuery(
     productsQueryOptions({ search, categoryId: categoryId ?? undefined }),
@@ -56,6 +87,23 @@ export function ProductsPage() {
   const categories = useQuery(categoriesQueryOptions());
   const uoms = useQuery(uomsQueryOptions());
   const createProduct = useCreateProduct();
+  const updateProduct = useUpdateProduct();
+
+  const stock = useQuery({
+    ...onHandQueryOptions({ productId: stockFor?.id ?? "" }),
+    enabled: stockFor !== null,
+  });
+  const locations = useQuery({
+    ...locationOptionsQueryOptions(),
+    enabled: stockFor !== null,
+  });
+  const locationLabel = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const location of locations.data ?? []) {
+      map.set(location.id, `${location.code} — ${location.name}`);
+    }
+    return map;
+  }, [locations.data]);
 
   const categoryOptions = useMemo(
     () => (categories.data ?? []).map((c) => ({ value: c.id, label: c.name })),
@@ -70,6 +118,20 @@ export function ProductsPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
+  function openCreate() {
+    setEditing(null);
+    setForm(EMPTY_FORM);
+    setErrors({});
+    setOpen(true);
+  }
+
+  function openEdit(product: Product) {
+    setEditing(product);
+    setForm(formFromProduct(product));
+    setErrors({});
+    setOpen(true);
+  }
+
   function submit() {
     const parsed = productFormSchema.safeParse(form);
     if (!parsed.success) {
@@ -77,12 +139,25 @@ export function ProductsPage() {
       return;
     }
     setErrors({});
+    if (editing) {
+      // PATCH body has no sku — the code is immutable after creation.
+      const { sku: _sku, ...patch } = parsed.data;
+      updateProduct.mutate(
+        { id: editing.id, input: patch },
+        { onSuccess: () => setOpen(false) },
+      );
+      return;
+    }
     createProduct.mutate(parsed.data, {
       onSuccess: () => {
         setOpen(false);
         setForm(EMPTY_FORM);
       },
     });
+  }
+
+  function toggleActive(product: Product) {
+    updateProduct.mutate({ id: product.id, input: { is_active: !product.is_active } });
   }
 
   const columns: Column<Product>[] = [
@@ -98,10 +173,49 @@ export function ProductsPage() {
         <span className="table-actions">
           {p.is_sellable ? <Badge tone="ok">sellable</Badge> : null}
           {p.is_purchasable ? <Badge>purchasable</Badge> : null}
+          {p.track_batches ? <Badge>batch</Badge> : null}
+          {p.track_serials ? <Badge>serial</Badge> : null}
           {!p.is_active ? <Badge tone="bad">inactive</Badge> : null}
         </span>
       ),
     },
+    {
+      key: "actions",
+      header: "",
+      align: "right",
+      render: (p) =>
+        canManage || canViewStock ? (
+          <span className="table-actions">
+            {canViewStock && p.stock_type === "stock" ? (
+              <Button variant="secondary" onClick={() => setStockFor(p)}>
+                Stock
+              </Button>
+            ) : null}
+            {canManage ? (
+              <>
+                <Button variant="secondary" onClick={() => openEdit(p)}>
+                  Edit
+                </Button>
+                <Button
+                  variant={p.is_active ? "danger" : "secondary"}
+                  onClick={() => toggleActive(p)}
+                  disabled={updateProduct.isPending}
+                >
+                  {p.is_active ? "Deactivate" : "Reactivate"}
+                </Button>
+              </>
+            ) : null}
+          </span>
+        ) : null,
+    },
+  ];
+
+  const stockColumns: Column<OnHandRow>[] = [
+    { key: "location", header: "Location", render: (r) => locationLabel.get(r.location_id) ?? r.location_id },
+    { key: "batch", header: "Batch", render: (r) => r.batch_ref ?? "—" },
+    { key: "on_hand", header: "On hand", align: "right", render: (r) => formatQty(r.on_hand) },
+    { key: "reserved", header: "Reserved", align: "right", render: (r) => formatQty(r.reserved) },
+    { key: "available", header: "Available", align: "right", render: (r) => formatQty(r.available) },
   ];
 
   return (
@@ -109,7 +223,7 @@ export function ProductsPage() {
       <PageHeader
         title="Catalog"
         description="Products, categories and units of measure"
-        actions={canManage ? <Button onClick={() => setOpen(true)}>New product</Button> : null}
+        actions={canManage ? <Button onClick={openCreate}>New product</Button> : null}
       />
 
       <Card>
@@ -147,7 +261,7 @@ export function ProductsPage() {
 
       <Modal
         open={open}
-        title="New product"
+        title={editing ? `Edit ${editing.sku}` : "New product"}
         onClose={() => setOpen(false)}
         wide
         footer={
@@ -155,16 +269,28 @@ export function ProductsPage() {
             <Button variant="secondary" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={submit} disabled={createProduct.isPending}>
-              {createProduct.isPending ? "Saving…" : "Create"}
+            <Button onClick={submit} disabled={createProduct.isPending || updateProduct.isPending}>
+              {createProduct.isPending || updateProduct.isPending
+                ? "Saving…"
+                : editing
+                  ? "Save"
+                  : "Create"}
             </Button>
           </>
         }
       >
-        <ErrorBanner error={createProduct.error} />
+        <ErrorBanner error={editing ? updateProduct.error : createProduct.error} />
         <div className="grid-2">
-          <Field label="SKU" error={errors.sku}>
-            <Input value={form.sku} onChange={(event) => setField("sku", event.target.value)} />
+          <Field
+            label="SKU"
+            error={errors.sku}
+            hint={editing ? "The SKU cannot be changed after creation." : undefined}
+          >
+            <Input
+              value={form.sku}
+              disabled={editing !== null}
+              onChange={(event) => setField("sku", event.target.value)}
+            />
           </Field>
           <Field label="Name" error={errors.name}>
             <Input value={form.name} onChange={(event) => setField("name", event.target.value)} />
@@ -240,8 +366,76 @@ export function ProductsPage() {
             />
             Active
           </label>
+          <label className="pill">
+            <input
+              type="checkbox"
+              checked={form.track_batches}
+              disabled={form.stock_type !== "stock"}
+              onChange={(event) => setField("track_batches", event.target.checked)}
+            />
+            Track batches
+          </label>
+          <label className="pill">
+            <input
+              type="checkbox"
+              checked={form.track_serials}
+              disabled={form.stock_type !== "stock"}
+              onChange={(event) => setField("track_serials", event.target.checked)}
+            />
+            Track serials
+          </label>
         </div>
       </Modal>
+
+      {/* ------------------------------------------- stock on-hand sheet */}
+      <Sheet
+        open={stockFor !== null}
+        title={stockFor ? `Stock — ${stockFor.sku} ${stockFor.name}` : "Stock"}
+        onClose={() => setStockFor(null)}
+      >
+        <div style={{ padding: 18 }}>
+          <ErrorBanner error={stock.error ?? locations.error} />
+          {stockFor ? (
+            <div className="grid-2" style={{ marginBottom: 14 }}>
+              <div>
+                <div className="muted">On hand (total)</div>
+                <div>
+                  {formatQty(
+                    (stock.data ?? []).reduce(
+                      (sum, row) => sum + (Number(row.on_hand) || 0),
+                      0,
+                    ),
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="muted">Available (total)</div>
+                <div>
+                  {formatQty(
+                    (stock.data ?? []).reduce(
+                      (sum, row) => sum + (Number(row.available) || 0),
+                      0,
+                    ),
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <DataTable
+            columns={stockColumns}
+            rows={stock.data}
+            rowKey={(row, index) => `${row.location_id}-${row.batch_ref ?? "-"}-${index}`}
+            loading={stock.isLoading}
+            onRetry={() => stock.refetch()}
+            empty={
+              <EmptyState
+                title="No stock yet"
+                message="Receive or adjust stock to see balances here."
+              />
+            }
+          />
+        </div>
+      </Sheet>
     </>
   );
 }

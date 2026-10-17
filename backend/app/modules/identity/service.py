@@ -92,7 +92,7 @@ def get_by_email(session: Session, email: str) -> User | None:
 def create_refresh_session(
     session: Session, user: User, *, jti_ttl_days: int = 14, user_agent: str | None = None, ip: str | None = None
 ) -> tuple[str, RefreshSession]:
-    jti = new_id() + new_id()
+    jti = new_id()
     from app.core.config import get_settings
 
     sess = RefreshSession(

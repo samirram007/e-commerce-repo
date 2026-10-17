@@ -17,7 +17,7 @@ from app.core.exceptions import BusinessRuleError, NotFoundError
 from app.core.security import new_id
 from app.modules.accounting.models import Account, JournalEntry, JournalLine
 from app.modules.companies.service import rate_for
-from app.modules.fiscal_years.service import ensure_period_open
+from app.modules.fiscal_years.service import ensure_period_open, resolve_fiscal_year
 from app.shared.money import dec, money
 from app.shared.numbering import allocate_number
 
@@ -50,6 +50,9 @@ DEFAULT_CHART: list[tuple[str, str, str, str]] = [
     ("5600", "Returns Expense", "expense", "debit"),
     ("5700", "Refund Expense", "expense", "debit"),
     ("6000", "Operating Expenses", "expense", "debit"),
+    ("6100", "Salaries & Wages Expense", "expense", "debit"),
+    ("2400", "Payroll Payable", "liability", "credit"),
+    ("2410", "Employee Withholdings Payable", "liability", "credit"),
 ]
 
 # posting-source account role map used by other modules via get_account_codes
@@ -74,6 +77,9 @@ DEFAULT_ROLE_CODES = {
     "returns_expense": "5600",
     "refund_expense": "5700",
     "operating_expenses": "6000",
+    "salaries_expense": "6100",
+    "payroll_payable": "2400",
+    "withholdings_payable": "2410",
 }
 
 
@@ -143,8 +149,16 @@ def post_journal_entry(
     currency: str | None = None,
     exchange_rate: Decimal | None = None,
     base_currency: str = "USD",
+    allow_closed_period: bool = False,
 ) -> JournalEntry:
-    """Create and post a balanced journal entry (the only posting path)."""
+    """Create and post a balanced journal entry (the only posting path).
+
+    `allow_closed_period` is a privileged escape hatch reserved for system
+    lifecycle postings (year-end closing) that must land on the fiscal year's
+    end date even after that month's period was closed by hand. The fiscal year
+    itself must still exist and be open — only the per-month period check is
+    skipped.
+    """
     if not lines or len(lines) < 2:
         raise BusinessRuleError("JOURNAL_NEEDS_LINES", "A journal entry needs at least two lines")
 
@@ -164,7 +178,21 @@ def post_journal_entry(
             f"Debits ({total_debit}) do not equal credits ({total_credit})",
         )
 
-    ensure_period_open(session, company_id=company_id, on_date=entry_date)
+    # Resolve (and validate) the posting period once, then snapshot the fiscal
+    # year onto the entry so historical bucketing is stable even if the fiscal
+    # year's date range is later edited.
+    if allow_closed_period:
+        fiscal_year = resolve_fiscal_year(session, company_id=company_id, on_date=entry_date)
+        if fiscal_year is None:
+            raise BusinessRuleError(
+                "NO_FISCAL_YEAR", f"No fiscal year defined for {entry_date}"
+            )
+        if not fiscal_year.is_open:
+            raise BusinessRuleError(
+                "FISCAL_YEAR_CLOSED", f"Fiscal year {fiscal_year.name} is closed"
+            )
+    else:
+        fiscal_year = ensure_period_open(session, company_id=company_id, on_date=entry_date)
     from app.core.config import get_settings
 
     rate = Decimal(str(exchange_rate)) if exchange_rate is not None else Decimal("1")
@@ -174,6 +202,7 @@ def post_journal_entry(
     doc_number = allocate_number(session, company_id, "journal_entry")
     entry = JournalEntry(
         company_id=company_id,
+        fiscal_year_id=fiscal_year.id,
         doc_number=doc_number,
         entry_date=entry_date,
         description=description,
@@ -276,7 +305,32 @@ def create_account(
 
 
 # ---- reports ----
-def trial_balance(session: Session, company_id: str, *, from_date: date | None, to_date: date | None) -> list[dict]:
+def trial_balance(
+    session: Session,
+    company_id: str,
+    *,
+    from_date: date | None,
+    to_date: date | None,
+    fiscal_year_id: str | None = None,
+    exclude_carry_forward: bool = False,
+    exclude_closing: bool = False,
+) -> list[dict]:
+    """Aggregated account balances for a window.
+
+    Carry-forward snapshots (`source_type == "carry_forward"`) re-state the
+    pre-forward history inside the target year so a fiscal-year-scoped view
+    shows opening balances. To avoid double-counting them against the
+    originals they duplicate:
+      * unbounded cumulative views (no ``from_date``, no FY filter) drop them;
+      * date-ranged views admit them only when the window opens exactly on the
+        snapshot's date (the year's first day);
+      * fiscal-year-scoped views keep them — membership is that year's own
+        entries, opening snapshot included.
+
+    ``exclude_closing`` drops year-end closing entries (P&L → retained
+    earnings) so income reports keep showing a closed year's real result;
+    balance-sheet views keep them because that is where the profit lands.
+    """
     stmt = (
         select(
             Account.code,
@@ -293,6 +347,22 @@ def trial_balance(session: Session, company_id: str, *, from_date: date | None, 
         stmt = stmt.where(JournalEntry.entry_date >= from_date)
     if to_date:
         stmt = stmt.where(JournalEntry.entry_date <= to_date)
+    if fiscal_year_id:
+        stmt = stmt.where(JournalEntry.fiscal_year_id == fiscal_year_id)
+    else:
+        if from_date is None:
+            stmt = stmt.where(JournalEntry.source_type != "carry_forward")
+        else:
+            stmt = stmt.where(
+                or_(
+                    JournalEntry.source_type != "carry_forward",
+                    JournalEntry.entry_date == from_date,
+                )
+            )
+    if exclude_carry_forward:
+        stmt = stmt.where(JournalEntry.source_type != "carry_forward")
+    if exclude_closing:
+        stmt = stmt.where(JournalEntry.source_type != "year_end_close")
     stmt = stmt.group_by(Account.code, Account.name, Account.account_type, JournalLine.side).order_by(Account.code)
     balances: dict[tuple[str, str, str], dict[str, Decimal]] = {}
     for code, name, atype, side, total in session.execute(stmt):
@@ -319,6 +389,7 @@ def general_ledger(
     account_code: str | None,
     from_date: date | None,
     to_date: date | None,
+    fiscal_year_id: str | None = None,
     limit: int = 500,
 ) -> list[dict]:
     stmt = (
@@ -335,6 +406,8 @@ def general_ledger(
         stmt = stmt.where(JournalEntry.entry_date >= from_date)
     if to_date:
         stmt = stmt.where(JournalEntry.entry_date <= to_date)
+    if fiscal_year_id:
+        stmt = stmt.where(JournalEntry.fiscal_year_id == fiscal_year_id)
     out = []
     for line, entry, account in session.execute(stmt):
         out.append({
@@ -354,13 +427,17 @@ def general_ledger(
 
 
 def profit_and_loss(session: Session, company_id: str, *, from_date: date, to_date: date) -> dict:
-    tb = trial_balance(session, company_id, from_date=from_date, to_date=to_date)
+    tb = trial_balance(
+        session, company_id, from_date=from_date, to_date=to_date, exclude_closing=True
+    )
     income = sum((abs(b["balance"]) for b in tb if b["account_type"] == "income"), Decimal("0"))
     expense = sum((b["balance"] for b in tb if b["account_type"] == "expense"), Decimal("0"))
     return {"from_date": from_date, "to_date": to_date, "income": income, "expense": expense, "profit": income - expense}
 
 
 def balance_sheet(session: Session, company_id: str, *, as_of: date) -> dict:
+    # Cumulative: carry-forward snapshots are excluded by the unbounded-view
+    # rule (they duplicate pre-forward history already summed here).
     tb = trial_balance(session, company_id, from_date=None, to_date=as_of)
     assets = sum((b["balance"] for b in tb if b["account_type"] == "asset"), Decimal("0"))
     liabilities = sum((-b["balance"] for b in tb if b["account_type"] == "liability"), Decimal("0"))

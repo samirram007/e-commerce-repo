@@ -12,6 +12,7 @@ from app.modules.companies import service as companies
 from app.modules.fiscal_years import service as fiscal
 from app.modules.identity import service as identity
 from app.modules.partners import service as partners
+from app.modules.payroll import service as payroll
 from app.modules.storage import service as storage
 from app.modules.taxes import service as taxes
 
@@ -88,9 +89,10 @@ def run_seed() -> None:
                     )
                 )
             demo_warehouse = None
-            for loc in storage.list_locations(session, company.id, location_type="warehouse"):
-                demo_warehouse = loc
-                break
+            for loc in storage.list_locations(session, company.id):
+                if loc.location_type in storage.FACILITY_TYPES:
+                    demo_warehouse = loc
+                    break
             if demo_warehouse is None:
                 wh = storage.create_location(
                     session, company_id=company.id, actor_user_id=admin.id, code="WH-MAIN", name="Main Warehouse", location_type="warehouse"
@@ -126,6 +128,49 @@ def run_seed() -> None:
                     session, company_id=company.id, actor_user_id=admin.id,
                     data={"code": "V-001", "name": "Demo Vendor", "email": "vendor@example.com"},
                 )
+
+                # demo payroll: three employees + a draft run for the current month
+                if not payroll.list_employees(session, company.id):
+                    for code, first, last, salary, allowances, deduction in [
+                        ("E-001", "Demo", "Manager", "4500.00", "200.00", "10"),
+                        ("E-002", "Sample", "Clerk", "2800.00", "100.00", "8"),
+                        ("E-003", "Test", "Worker", "2200.00", "0", "5"),
+                    ]:
+                        payroll.create_employee(
+                            session, company_id=company.id, actor_user_id=admin.id,
+                            data={
+                                "employee_code": code,
+                                "first_name": first,
+                                "last_name": last,
+                                "job_title": "Demo Staff",
+                                "base_salary": salary,
+                                "allowances": allowances,
+                                "deduction_rate": deduction,
+                            },
+                        )
+                    from datetime import date
+
+                    today = date.today()
+                    existing = [
+                        r
+                        for r in payroll.list_runs(session, company.id)
+                        if r.period_year == today.year
+                        and r.period_month == today.month
+                        and r.status != "cancelled"
+                    ]
+                    if not existing:
+                        payroll.run_payroll(
+                            session,
+                            company_id=company.id,
+                            actor_user_id=admin.id,
+                            period_year=today.year,
+                            period_month=today.month,
+                        )
+                        logger.info(
+                            "seeded draft payroll run %d-%02d",
+                            today.year,
+                            today.month,
+                        )
             session.commit()
         logger.info("seed complete")
     except Exception:

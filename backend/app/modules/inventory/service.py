@@ -25,6 +25,7 @@ from app.modules.inventory.models import (
     StockCountLine,
     StockLedgerEntry,
     StockOnHand,
+    StockSerial,
     StockTransfer,
 )
 from app.modules.storage import service as storage_svc
@@ -95,6 +96,174 @@ def available_qty(row: StockOnHand) -> Decimal:
     return dec(row.on_hand) - dec(row.reserved)
 
 
+def _assert_serials_free(session: Session, company_id: str, product_id: str, serials: list[str]) -> None:
+    if len(set(serials)) != len(serials):
+        raise BusinessRuleError("SERIAL_DUPLICATE", "Duplicate serial number(s) on the same movement")
+    existing = set(
+        session.scalars(
+            select(StockSerial.serial_number).where(
+                StockSerial.company_id == company_id,
+                StockSerial.product_id == product_id,
+                StockSerial.serial_number.in_(serials),
+            )
+        ).all()
+    )
+    clash = sorted(set(serials) & existing)
+    if clash:
+        raise BusinessRuleError(
+            "SERIAL_DUPLICATE", f"Serial number(s) already recorded for this product: {', '.join(clash)}"
+        )
+
+
+def _apply_batch_and_serial_rules(
+    session: Session,
+    *,
+    company_id: str,
+    product,
+    movement_type: str,
+    product_id: str,
+    location_id: str,
+    quantity: Decimal,
+    batch_ref: str | None,
+    expiry_date,
+    serials: list[str] | None,
+    source_type: str,
+    source_id: str,
+    source_line_id: str | None,
+    actor_user_id: str | None,
+) -> None:
+    """Enforce batch/serial tracking declared on the product.
+
+    * batch-tracked products must supply a batch_ref on goods receipts
+    * serial-tracked products must supply one serial per unit on goods receipts;
+      the units are registered as `in_stock`
+    * outbound movements of serial-tracked products release serials (FIFO, or the
+      serials explicitly given) and mark them `issued`
+    Other inbound paths (transfers/adjustments/returns) are not yet serial-aware.
+    """
+    if not getattr(product, "track_batches", False) and not getattr(product, "track_serials", False):
+        return
+
+    if quantity > 0:
+        if getattr(product, "track_batches", False) and movement_type == "receipt" and not batch_ref:
+            raise BusinessRuleError(
+                "BATCH_REQUIRED", "This product tracks batches; provide a batch reference for the receipt"
+            )
+        if not getattr(product, "track_serials", False):
+            return
+        provided = [s.strip() for s in (serials or []) if s and str(s).strip()]
+        if not provided:
+            if movement_type == "receipt":
+                raise BusinessRuleError(
+                    "SERIALS_REQUIRED",
+                    "This product tracks serial numbers; enter one serial number per unit received",
+                )
+            return
+        if quantity != quantity.to_integral_value():
+            raise BusinessRuleError("SERIALS_QTY_INVALID", "Serial-tracked quantities must be whole numbers")
+        if Decimal(len(provided)) != quantity:
+            raise BusinessRuleError(
+                "SERIALS_QTY_MISMATCH", f"Expected {int(quantity)} serial number(s), got {len(provided)}"
+            )
+        _assert_serials_free(session, company_id, product_id, provided)
+        for sn in provided:
+            session.add(
+                StockSerial(
+                    company_id=company_id,
+                    product_id=product_id,
+                    location_id=location_id,
+                    batch_ref=batch_ref,
+                    expiry_date=expiry_date,
+                    serial_number=sn,
+                    status="in_stock",
+                    source_type=source_type,
+                    source_id=source_id,
+                    source_line_id=source_line_id,
+                    created_by=actor_user_id,
+                )
+            )
+        session.flush()
+        return
+
+    if not getattr(product, "track_serials", False):
+        return
+    if quantity != quantity.to_integral_value():
+        raise BusinessRuleError("SERIALS_QTY_INVALID", "Serial-tracked quantities must be whole numbers")
+    needed = int(abs(quantity))
+    stmt = select(StockSerial).where(
+        StockSerial.company_id == company_id,
+        StockSerial.product_id == product_id,
+        StockSerial.location_id == location_id,
+        StockSerial.status == "in_stock",
+    )
+    if batch_ref:
+        stmt = stmt.where(StockSerial.batch_ref == batch_ref)
+    if serials:
+        wanted = [s.strip() for s in serials if s and str(s).strip()]
+        if wanted:
+            stmt = stmt.where(StockSerial.serial_number.in_(wanted))
+    rows = session.scalars(stmt.order_by(StockSerial.created_at.asc()).limit(needed)).all()
+    if len(rows) < needed:
+        tracked = session.scalar(
+            select(func.count())
+            .select_from(StockSerial)
+            .where(
+                StockSerial.company_id == company_id,
+                StockSerial.product_id == product_id,
+                StockSerial.location_id == location_id,
+                StockSerial.status == "in_stock",
+            )
+        )
+        # Legacy stock with no registered serials is left alone; otherwise this is a hard error.
+        if tracked:
+            raise BusinessRuleError(
+                "SERIALS_UNAVAILABLE", f"Only {len(rows)} serial(s) available to issue (need {needed})"
+            )
+        return
+    now = datetime.now(timezone.utc)
+    for serial_row in rows:
+        serial_row.status = "issued"
+        serial_row.issued_source_type = source_type
+        serial_row.issued_source_id = source_id
+        serial_row.issued_at = now
+    session.flush()
+
+
+def serials_view(
+    session: Session,
+    company_id: str,
+    *,
+    product_id: str | None = None,
+    location_id: str | None = None,
+    status: str | None = None,
+    batch_ref: str | None = None,
+    search: str | None = None,
+    limit: int = 500,
+):
+    from app.modules.catalog.models import Product
+    from app.modules.storage.models import StorageLocation
+
+    stmt = (
+        select(StockSerial, Product.sku, StorageLocation.code)
+        .join(Product, StockSerial.product_id == Product.id)
+        .join(StorageLocation, StockSerial.location_id == StorageLocation.id)
+        .where(StockSerial.company_id == company_id)
+        .order_by(StockSerial.created_at.desc(), StockSerial.id.desc())
+        .limit(min(limit, 2000))
+    )
+    if product_id:
+        stmt = stmt.where(StockSerial.product_id == product_id)
+    if location_id:
+        stmt = stmt.where(StockSerial.location_id == location_id)
+    if status:
+        stmt = stmt.where(StockSerial.status == status)
+    if batch_ref:
+        stmt = stmt.where(StockSerial.batch_ref == batch_ref)
+    if search:
+        stmt = stmt.where(StockSerial.serial_number.ilike(f"%{search.strip()}%"))
+    return session.execute(stmt).all()
+
+
 def post_movement(
     session: Session,
     *,
@@ -106,6 +275,7 @@ def post_movement(
     unit_cost=None,
     batch_ref: str | None = None,
     expiry_date=None,
+    serials: list[str] | None = None,
     source_type: str,
     source_id: str,
     source_line_id: str | None = None,
@@ -127,6 +297,24 @@ def post_movement(
             "NEGATIVE_STOCK",
             f"Movement would drive stock negative at this location (have {row.on_hand}, delta {quantity})",
         )
+
+    product = get_product_check(session, product_id, company_id)
+    _apply_batch_and_serial_rules(
+        session,
+        company_id=company_id,
+        product=product,
+        movement_type=movement_type,
+        product_id=product_id,
+        location_id=location_id,
+        quantity=quantity,
+        batch_ref=batch_ref,
+        expiry_date=expiry_date,
+        serials=serials,
+        source_type=source_type,
+        source_id=source_id,
+        source_line_id=source_line_id,
+        actor_user_id=actor_user_id,
+    )
 
     unit_cost_value = None if unit_cost is None else money(dec(unit_cost), 2)
     entry = _ledger_entry(
@@ -297,7 +485,7 @@ def transfer_stock(
         raise BusinessRuleError("SAME_LOCATION", "Source and destination must differ")
     if origin.company_id != company_id or destination.company_id != company_id:
         raise BusinessRuleError("CROSS_COMPANY_MOVE", "Both locations must belong to the company")
-    if origin.location_type != "bin" or destination.location_type != "bin":
+    if origin.location_type not in storage_svc.STOCKABLE_TYPES or destination.location_type not in storage_svc.STOCKABLE_TYPES:
         raise BusinessRuleError("BIN_REQUIRED", "Transfers move stock between bin-level locations")
     source_id = source_id or new_id()
     avg_cost = weighted_avg_cost(session, company_id, product_id)

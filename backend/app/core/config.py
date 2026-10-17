@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 14
 
-    database_url: str = "sqlite:///./erp_dev.db"
+    database_url: str = "mysql+pymysql://root:Samir@007@localhost:3307/erp"
     db_pool_size: int = 10
     db_max_overflow: int = 20
 

@@ -56,6 +56,7 @@ class ManualJournalIn(BaseModel):
 
 class JournalOut(BaseModel):
     id: str
+    fiscal_year_id: str | None
     doc_number: str
     entry_date: date
     description: str | None
@@ -106,6 +107,7 @@ def _entry_out(session: Session, entry: JournalEntry) -> JournalOut:
         )
     return JournalOut(
         id=entry.id,
+        fiscal_year_id=entry.fiscal_year_id,
         doc_number=entry.doc_number,
         entry_date=entry.entry_date,
         description=entry.description,
@@ -126,6 +128,26 @@ def list_accounts(
     rows = session.execute(
         select(Account).where(Account.company_id == ctx.company_id).order_by(Account.code)
     ).scalars().all()
+    return [AccountOut.model_validate(a) for a in rows]
+
+
+@router.post("/accounts/seed-defaults", response_model=list[AccountOut], status_code=201)
+def seed_default_accounts(
+    ctx: CompanyCtx = Depends(guard(P_ACCOUNTS_MANAGE)), session: Session = Depends(get_db)
+):
+    """Idempotently create any missing default chart accounts (first-run/new
+    database setup). Accounts already present are left untouched."""
+    from app.modules.companies.service import get_company
+
+    company = get_company(session, ctx.company_id)
+    svc.create_default_chart(session, company=company)
+    rows = session.execute(
+        select(Account).where(Account.company_id == ctx.company_id).order_by(Account.code)
+    ).scalars().all()
+    log_action(
+        session, action="account.chart_seeded", entity_type="company",
+        entity_id=company.id, actor_user_id=ctx.user.id, company_id=ctx.company_id,
+    )
     return [AccountOut.model_validate(a) for a in rows]
 
 
@@ -150,14 +172,19 @@ def create_account(
 # ---- journals ----
 @router.get("/journal-entries", response_model=list[JournalOut])
 def list_journals(
-    ctx: CompanyCtx = Depends(guard(P_JOURNAL_VIEW)), session: Session = Depends(get_db)
+    fiscal_year_id: str | None = None,
+    ctx: CompanyCtx = Depends(guard(P_JOURNAL_VIEW)),
+    session: Session = Depends(get_db),
 ):
-    rows = session.execute(
+    stmt = (
         select(JournalEntry)
         .where(JournalEntry.company_id == ctx.company_id)
         .order_by(JournalEntry.entry_date.desc(), JournalEntry.doc_number.desc())
         .limit(500)
-    ).scalars().all()
+    )
+    if fiscal_year_id:
+        stmt = stmt.where(JournalEntry.fiscal_year_id == fiscal_year_id)
+    rows = session.execute(stmt).scalars().all()
     return [_entry_out(session, e) for e in rows]
 
 
@@ -225,10 +252,13 @@ def reverse_journal(
 def trial_balance(
     from_date: date | None = None,
     to_date: date | None = None,
+    fiscal_year_id: str | None = None,
     ctx: CompanyCtx = Depends(guard(P_REPORTS_VIEW)),
     session: Session = Depends(get_db),
 ):
-    rows = svc.trial_balance(session, ctx.company_id, from_date=from_date, to_date=to_date)
+    rows = svc.trial_balance(
+        session, ctx.company_id, from_date=from_date, to_date=to_date, fiscal_year_id=fiscal_year_id
+    )
     return [TrialBalanceRow(**r) for r in rows]
 
 
@@ -250,7 +280,7 @@ def balance_sheet(
     session: Session = Depends(get_db),
 ):
     b = svc.balance_sheet(session, ctx.company_id, as_of=as_of)
-    return {"as_of": str(b["as_of"]), "assets": str(b["assets"]), "liabilities": str(b["liabilities"]), "equity_total": str(b["equity_total"]), "balanced": str(b["check_liabilities_plus_equity"]) == "0.00"}
+    return {"as_of": str(b["as_of"]), "assets": str(b["assets"]), "liabilities": str(b["liabilities"]), "equity_total": str(b["equity_total"]), "balanced": b["check_liabilities_plus_equity"] == 0}
 
 
 @router.get("/reports/general-ledger")
@@ -258,10 +288,18 @@ def general_ledger(
     account_code: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
+    fiscal_year_id: str | None = None,
     ctx: CompanyCtx = Depends(guard(P_REPORTS_VIEW)),
     session: Session = Depends(get_db),
 ):
-    rows = svc.general_ledger(session, ctx.company_id, account_code=account_code, from_date=from_date, to_date=to_date)
+    rows = svc.general_ledger(
+        session,
+        ctx.company_id,
+        account_code=account_code,
+        from_date=from_date,
+        to_date=to_date,
+        fiscal_year_id=fiscal_year_id,
+    )
     return [
         {
             "doc_number": r["doc_number"],

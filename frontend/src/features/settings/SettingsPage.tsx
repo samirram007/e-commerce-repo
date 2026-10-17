@@ -16,15 +16,14 @@ import {
 } from "../../components/ui";
 import { SheetSelect } from "../../components/sheet";
 import { usePermissions } from "../../hooks/use-permissions";
-import { formatDate, titleCase } from "../../lib/format";
+import { titleCase } from "../../lib/format";
 import { fieldErrors } from "../../lib/zod-utils";
+import { FiscalYearsTab } from "./FiscalYearsTab";
 import {
   companiesQueryOptions,
-  fiscalYearsQueryOptions,
   storageLocationsQueryOptions,
   taxRatesQueryOptions,
   useCreateCompany,
-  useCreateFiscalYear,
   useCreateStorageLocation,
   useCreateTaxRate,
   useUpdateCompany,
@@ -33,14 +32,12 @@ import {
   LOCATION_TYPES,
   companyCreateFormSchema,
   companyUpdateFormSchema,
-  fiscalYearFormSchema,
+  locationRank,
   storageLocationFormSchema,
   taxRateFormSchema,
   type Company,
   type CompanyCreateFormInput,
   type CompanyUpdateFormInput,
-  type FiscalYear,
-  type FiscalYearFormInput,
   type LocationType,
   type StorageLocation,
   type StorageLocationFormInput,
@@ -520,10 +517,15 @@ function StorageTab() {
     return typeFilter ? all.filter((location) => location.location_type === typeFilter) : all;
   }, [locations.data, typeFilter]);
 
-  const parentOptions = useMemo(
-    () => (locations.data ?? []).map((l) => ({ value: l.id, label: `${l.code} — ${l.name}` })),
-    [locations.data],
-  );
+  const parentOptions = useMemo(() => {
+    // Only deeper types may become the parent (child rank must be greater).
+    const childRank = locationRank(form.location_type);
+    return (locations.data ?? [])
+      .filter((location) => locationRank(location.location_type) < childRank)
+      .map((location) => ({ value: location.id, label: `${location.code} — ${location.name}` }));
+  }, [locations.data, form.location_type]);
+
+  const isFacility = locationRank(form.location_type) === 0;
 
   function submit() {
     const parsed = storageLocationFormSchema.safeParse(form);
@@ -582,7 +584,7 @@ function StorageTab() {
           loading={locations.isLoading}
           error={locations.error}
           onRetry={() => locations.refetch()}
-          empty={<EmptyState title="No locations" message="Add a warehouse or storage bin." />}
+          empty={<EmptyState title="No locations" message="Add a warehouse, godown, or storage bin." />}
         />
       </Card>
 
@@ -622,18 +624,33 @@ function StorageTab() {
               value={form.location_type}
               options={LOCATION_TYPES.map((type) => ({ value: type, label: titleCase(type) }))}
               onChange={(value) =>
-                setForm((prev) => ({ ...prev, location_type: value as LocationType }))
+                setForm((prev) => {
+                  const nextType = value as LocationType;
+                  const nextRank = locationRank(nextType);
+                  const parentOk =
+                    prev.parent_id === null ||
+                    (locations.data ?? []).some(
+                      (l) => l.id === prev.parent_id && locationRank(l.location_type) < nextRank,
+                    );
+                  return { ...prev, location_type: nextType, parent_id: parentOk ? prev.parent_id : null };
+                })
               }
             />
           </Field>
-          <Field label="Parent location" error={errors.parent_id}>
-            <SheetSelect
-              value={form.parent_id ?? ""}
-              options={[{ value: "", label: "— No parent —" }, ...parentOptions]}
-              onChange={(value) => setForm((prev) => ({ ...prev, parent_id: value === "" ? null : value }))}
-              placeholder="No parent"
-            />
-          </Field>
+          {isFacility ? (
+            <Field label="Parent location">
+              <Input value="— Facilities are top-level —" disabled />
+            </Field>
+          ) : (
+            <Field label="Parent location" error={errors.parent_id}>
+              <SheetSelect
+                value={form.parent_id ?? ""}
+                options={[{ value: "", label: "— No parent —" }, ...parentOptions]}
+                onChange={(value) => setForm((prev) => ({ ...prev, parent_id: value === "" ? null : value }))}
+                placeholder="No parent"
+              />
+            </Field>
+          )}
         </div>
         <Field label="Address" error={errors.address}>
           <Input
@@ -641,129 +658,6 @@ function StorageTab() {
             onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))}
           />
         </Field>
-      </Modal>
-    </>
-  );
-}
-
-/* --------------------------------------------------------------- fiscal years */
-
-const EMPTY_FISCAL: FiscalYearFormInput = { name: "", start_date: "", end_date: "" };
-
-function FiscalYearsTab() {
-  const { has } = usePermissions();
-  const canManage = has("fiscal.manage");
-
-  const fiscalYears = useQuery(fiscalYearsQueryOptions());
-  const createFiscalYear = useCreateFiscalYear();
-
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<FiscalYearFormInput>(EMPTY_FISCAL);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const rows = useMemo(() => {
-    const all = fiscalYears.data ?? [];
-    if (statusFilter === "open") return all.filter((fy) => fy.is_open);
-    if (statusFilter === "closed") return all.filter((fy) => !fy.is_open);
-    return all;
-  }, [fiscalYears.data, statusFilter]);
-
-  function submit() {
-    const parsed = fiscalYearFormSchema.safeParse(form);
-    if (!parsed.success) {
-      setErrors(fieldErrors(parsed.error));
-      return;
-    }
-    setErrors({});
-    createFiscalYear.mutate(parsed.data, {
-      onSuccess: () => {
-        setOpen(false);
-        setForm(EMPTY_FISCAL);
-      },
-    });
-  }
-
-  const columns: Column<FiscalYear>[] = [
-    { key: "name", header: "Name", render: (fy) => <strong>{fy.name || "—"}</strong> },
-    { key: "start", header: "Start", render: (fy) => formatDate(fy.start_date) },
-    { key: "end", header: "End", render: (fy) => formatDate(fy.end_date) },
-    {
-      key: "status",
-      header: "Status",
-      render: (fy) => <Badge tone={fy.is_open ? "ok" : "bad"}>{fy.is_open ? "open" : "closed"}</Badge>,
-    },
-  ];
-
-  return (
-    <>
-      <Card
-        title="Fiscal years"
-        actions={canManage ? <Button onClick={() => setOpen(true)}>New fiscal year</Button> : null}
-      >
-        <div className="form-row" style={{ marginBottom: 12 }}>
-          <Field label="Status">
-            <SheetSelect
-              value={statusFilter ?? ""}
-              options={[
-                { value: "", label: "All" },
-                { value: "open", label: "Open" },
-                { value: "closed", label: "Closed" },
-              ]}
-              onChange={(value) => setStatusFilter(value === "" ? null : value)}
-              placeholder="All"
-            />
-          </Field>
-        </div>
-        <DataTable
-          columns={columns}
-          rows={rows}
-          rowKey={(fy) => fy.id}
-          loading={fiscalYears.isLoading}
-          error={fiscalYears.error}
-          onRetry={() => fiscalYears.refetch()}
-          empty={<EmptyState title="No fiscal years" message="Define your accounting calendar." />}
-        />
-      </Card>
-
-      <Modal
-        open={open}
-        title="New fiscal year"
-        onClose={() => setOpen(false)}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={submit} disabled={createFiscalYear.isPending}>
-              {createFiscalYear.isPending ? "Saving…" : "Create"}
-            </Button>
-          </>
-        }
-      >
-        <ErrorBanner error={createFiscalYear.error} />
-        <Field label="Name" error={errors.name} hint="Optional — defaults to the date range.">
-          <Input
-            value={form.name}
-            onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-          />
-        </Field>
-        <div className="grid-2">
-          <Field label="Start date" error={errors.start_date}>
-            <Input
-              type="date"
-              value={form.start_date}
-              onChange={(event) => setForm((prev) => ({ ...prev, start_date: event.target.value }))}
-            />
-          </Field>
-          <Field label="End date" error={errors.end_date}>
-            <Input
-              type="date"
-              value={form.end_date}
-              onChange={(event) => setForm((prev) => ({ ...prev, end_date: event.target.value }))}
-            />
-          </Field>
-        </div>
       </Modal>
     </>
   );

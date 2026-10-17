@@ -54,6 +54,7 @@ class ReceiveLineIn(BaseModel):
     location_id: str
     batch_ref: str | None = None
     expiry_date: date | None = None
+    serials: list[str] | None = None
 
 
 class ReceiveIn(BaseModel):

@@ -57,6 +57,8 @@ export const productFormSchema = z.object({
   uom_id: z.string().nullable().optional(),
   barcode: z.string().trim().max(64).optional(),
   stock_type: z.enum(STOCK_TYPES),
+  track_batches: z.boolean(),
+  track_serials: z.boolean(),
   base_cost: moneyInput,
   base_price: moneyInput,
   is_sellable: z.boolean(),

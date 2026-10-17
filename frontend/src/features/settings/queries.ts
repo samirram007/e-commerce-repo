@@ -1,19 +1,25 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  closeAccountingPeriod,
+  closeFiscalYear,
   createCompany,
   createFiscalYear,
   createStorageLocation,
   createTaxRate,
   fetchCompanies,
+  fetchFiscalYearPeriods,
   fetchFiscalYears,
   fetchStorageLocations,
   fetchTaxRates,
+  forwardFiscalYear,
+  postOpeningBalances,
   updateCompany,
 } from "./api";
 import type {
   CompanyCreatePayload,
   CompanyUpdatePayload,
   FiscalYearPayload,
+  OpeningBalancesPayload,
   StorageLocationPayload,
   TaxRatePayload,
 } from "./schemas";
@@ -24,7 +30,18 @@ export const settingsKeys = {
   taxRates: () => [...settingsKeys.all, "tax-rates"] as const,
   locations: () => [...settingsKeys.all, "storage-locations"] as const,
   fiscalYears: () => [...settingsKeys.all, "fiscal-years"] as const,
+  fiscalYearPeriods: (fiscalYearId: string) =>
+    [...settingsKeys.all, "fiscal-year-periods", fiscalYearId] as const,
 };
+
+/** Lifecycle mutations refresh the year list, its periods, and the period
+ * context (the topbar fiscal-year picker shows open/closed state). */
+function invalidateFiscal(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: settingsKeys.fiscalYears() });
+  void queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "fiscal-year-periods"] });
+  void queryClient.invalidateQueries({ queryKey: ["periods"] });
+  void queryClient.invalidateQueries({ queryKey: ["accounting"] });
+}
 
 export function companiesQueryOptions() {
   return queryOptions({
@@ -92,5 +109,46 @@ export function useCreateFiscalYear() {
   return useMutation({
     mutationFn: (input: FiscalYearPayload) => createFiscalYear(input),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.fiscalYears() }),
+  });
+}
+
+export function fiscalYearPeriodsQueryOptions(fiscalYearId: string) {
+  return queryOptions({
+    queryKey: settingsKeys.fiscalYearPeriods(fiscalYearId),
+    queryFn: () => fetchFiscalYearPeriods(fiscalYearId),
+    enabled: Boolean(fiscalYearId),
+  });
+}
+
+export function useClosePeriod(fiscalYearId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (periodId: string) => closeAccountingPeriod(fiscalYearId, periodId),
+    onSuccess: () => invalidateFiscal(queryClient),
+  });
+}
+
+export function useCloseFiscalYear() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (fiscalYearId: string) => closeFiscalYear(fiscalYearId),
+    onSuccess: () => invalidateFiscal(queryClient),
+  });
+}
+
+export function useForwardFiscalYear() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (fiscalYearId: string) => forwardFiscalYear(fiscalYearId),
+    onSuccess: () => invalidateFiscal(queryClient),
+  });
+}
+
+export function usePostOpeningBalances() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ fiscalYearId, input }: { fiscalYearId: string; input: OpeningBalancesPayload }) =>
+      postOpeningBalances(fiscalYearId, input),
+    onSuccess: () => invalidateFiscal(queryClient),
   });
 }

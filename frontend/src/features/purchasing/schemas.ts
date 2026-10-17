@@ -101,6 +101,8 @@ export const productOptionSchema = z.object({
   default_tax_rate_id: z.string().nullable().optional(),
   base_cost: decimalString,
   is_purchasable: z.boolean().optional(),
+  track_batches: z.boolean().optional(),
+  track_serials: z.boolean().optional(),
 });
 export type ProductOption = z.infer<typeof productOptionSchema>;
 export const productOptionListSchema = z.object({
@@ -194,6 +196,7 @@ export const receiveFormSchema = z.object({
         order_line_id: z.string(),
         qty_received: positiveQty,
         batch_ref: z.string().optional(),
+        serials: z.string().optional(),
       }),
     )
     .min(1, "Enter at least one quantity"),
@@ -205,6 +208,7 @@ export interface ReceiveLinePayload {
   qty_received: string;
   location_id: string;
   batch_ref?: string;
+  serials?: string[];
 }
 
 export const billLineFormSchema = z.object({

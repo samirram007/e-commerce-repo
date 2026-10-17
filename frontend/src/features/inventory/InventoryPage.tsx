@@ -4,9 +4,10 @@ import { CountsTab } from "./CountsTab";
 import { LedgerTab } from "./LedgerTab";
 import { AdjustmentsTab, TransfersTab } from "./MovementsTabs";
 import { OnHandTab } from "./OnHandTab";
+import { SerialsTab } from "./SerialsTab";
 import { ValuationTab } from "./ValuationTab";
 
-type InventoryTab = "on-hand" | "ledger" | "transfers" | "adjustments" | "counts" | "valuation";
+type InventoryTab = "on-hand" | "ledger" | "transfers" | "adjustments" | "counts" | "serials" | "valuation";
 
 export function InventoryPage() {
   const [tab, setTab] = useState<InventoryTab>("on-hand");
@@ -24,6 +25,7 @@ export function InventoryPage() {
           { key: "transfers", label: "Transfers" },
           { key: "adjustments", label: "Adjustments" },
           { key: "counts", label: "Counts" },
+          { key: "serials", label: "Serials" },
           { key: "valuation", label: "Valuation" },
         ]}
         active={tab}
@@ -35,6 +37,7 @@ export function InventoryPage() {
       {tab === "transfers" ? <TransfersTab /> : null}
       {tab === "adjustments" ? <AdjustmentsTab /> : null}
       {tab === "counts" ? <CountsTab /> : null}
+      {tab === "serials" ? <SerialsTab /> : null}
       {tab === "valuation" ? <ValuationTab /> : null}
     </>
   );

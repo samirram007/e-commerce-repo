@@ -1,11 +1,51 @@
-"""Storage locations: warehouse hierarchy (zone/aisle/rack/bin via type + parent)."""
+"""Storage locations: facility → zone → aisle → rack → shelf → bin hierarchy.
+
+A location's `location_type` determines its rank. A child must have a strictly
+greater rank than its parent, so a *facility* (rank 0) is always a root and only
+a *stockable* leaf type can sit at the bottom and hold stock.
+"""
 from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.security import new_id
 from app.db.base import Base, CreatedByMixin, TimestampMixin
 
-LOCATION_TYPES = ["warehouse", "zone", "aisle", "rack", "bin"]
+# Ordered hierarchy. Multiple facility types are accepted so a company can name
+# its root nodes the way it actually works (warehouse, godown, store, depot, …).
+LOCATION_TYPE_RANKS: dict[str, int] = {
+    # facilities / sites — may be a root (no parent)
+    "warehouse": 0,
+    "godown": 0,
+    "store": 0,
+    "depot": 0,
+    "branch": 0,
+    "showroom": 0,
+    "outlet": 0,
+    "yard": 0,
+    "cold_storage": 0,
+    "bonded": 0,
+    "transit": 0,
+    "quarantine": 0,
+    "scrap": 0,
+    # internal structure
+    "floor": 1,
+    "zone": 1,
+    "aisle": 2,
+    "rack": 3,
+    "shelf": 4,
+    "bin": 5,
+}
+
+# Every accepted type, ordered (facility types first).
+LOCATION_TYPES: tuple[str, ...] = tuple(LOCATION_TYPE_RANKS)
+
+# Facility types may be a root; every other type requires a parent.
+FACILITY_TYPES: frozenset[str] = frozenset(
+    name for name, rank in LOCATION_TYPE_RANKS.items() if rank == 0
+)
+
+# Types that may physically hold stock (stock movements / on-hand only allow these).
+STOCKABLE_TYPES: frozenset[str] = frozenset({"bin"})
 
 
 class StorageLocation(Base, TimestampMixin, CreatedByMixin):

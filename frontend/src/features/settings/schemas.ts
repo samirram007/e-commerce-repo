@@ -1,4 +1,13 @@
 import { z } from "zod";
+import {
+  FACILITY_TYPES,
+  LOCATION_TYPES,
+  STOCKABLE_TYPES,
+  isFacilityType,
+  isStockableType,
+  locationRank,
+  type LocationType,
+} from "../../lib/location-types";
 
 /** Money/percent values arrive from the API as decimal strings (Pydantic v2 JSON). */
 const decimalString = z.union([z.string(), z.number()]).transform((value) => String(value));
@@ -80,8 +89,8 @@ export type TaxRateFormInput = z.input<typeof taxRateFormSchema>;
 export type TaxRatePayload = z.output<typeof taxRateFormSchema>;
 
 /* ---- storage locations ---- */
-export const LOCATION_TYPES = ["warehouse", "zone", "aisle", "rack", "bin"] as const;
-export type LocationType = (typeof LOCATION_TYPES)[number];
+export { LOCATION_TYPES, FACILITY_TYPES, STOCKABLE_TYPES, isFacilityType, isStockableType, locationRank };
+export type { LocationType };
 
 export const storageLocationSchema = z.object({
   id: z.string(),
@@ -117,6 +126,60 @@ export const fiscalYearSchema = z.object({
 export type FiscalYear = z.infer<typeof fiscalYearSchema>;
 
 export const fiscalYearListSchema = z.array(fiscalYearSchema);
+
+/** Monthly accounting period under a fiscal year (`GET /fiscal-years/{id}/periods`). */
+export const fiscalYearPeriodSchema = z.object({
+  id: z.string(),
+  start_date: z.string(),
+  end_date: z.string(),
+  is_open: z.boolean(),
+});
+export type FiscalYearPeriod = z.infer<typeof fiscalYearPeriodSchema>;
+export const fiscalYearPeriodListSchema = z.array(fiscalYearPeriodSchema);
+
+export const closeFiscalYearResultSchema = z.object({
+  id: z.string(),
+  is_open: z.boolean(),
+  closing_entry_id: z.string().nullable(),
+  periods_closed: z.boolean(),
+});
+export type CloseFiscalYearResult = z.infer<typeof closeFiscalYearResultSchema>;
+
+export const forwardFiscalYearResultSchema = z.object({
+  from_fiscal_year_id: z.string(),
+  to_fiscal_year_id: z.string(),
+  to_created: z.boolean(),
+  journal_entry_id: z.string(),
+  doc_number: z.string(),
+  accounts_carried: z.number(),
+});
+export type ForwardFiscalYearResult = z.infer<typeof forwardFiscalYearResultSchema>;
+
+export const openingBalancesResultSchema = z.object({
+  id: z.string(),
+  doc_number: z.string(),
+  entry_date: z.string(),
+  fiscal_year_id: z.string().nullable(),
+  status: z.string(),
+});
+export type OpeningBalancesResult = z.infer<typeof openingBalancesResultSchema>;
+
+export const openingBalancesPayloadSchema = z.object({
+  entry_date: z.string().nullable().optional(),
+  description: z.string().max(200).optional(),
+  lines: z
+    .array(
+      z.object({
+        account_code: z.string().min(1, "Account is required"),
+        side: z.enum(["debit", "credit"]),
+        amount: z.union([z.string(), z.number()]).transform((value) => String(value)),
+        description: z.string().max(200).optional(),
+      }),
+    )
+    .min(2, "Opening balances need at least two lines"),
+});
+export type OpeningBalancesPayload = z.output<typeof openingBalancesPayloadSchema>;
+export type OpeningBalancesFormInput = z.input<typeof openingBalancesPayloadSchema>;
 
 export const fiscalYearFormSchema = z
   .object({

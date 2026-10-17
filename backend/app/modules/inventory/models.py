@@ -107,3 +107,35 @@ class StockTransfer(Base, TimestampMixin, CreatedByMixin):
     transfer_ref: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     lines: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     in_transit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+SERIAL_STATUSES = ["in_stock", "issued"]
+
+
+class StockSerial(Base, TimestampMixin, CreatedByMixin):
+    """One physical serialised unit of a serial-tracked product.
+
+    Created when stock is received, marked `issued` when it leaves stock.
+    A serial number is unique per (company, product)."""
+    __tablename__ = "stock_serials"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    location_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    batch_ref: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    serial_number: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="in_stock", index=True)
+    # receipt linkage
+    source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    source_line_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # issue linkage
+    issued_source_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    issued_source_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("company_id", "product_id", "serial_number", name="uq_stock_serial_key"),
+    )

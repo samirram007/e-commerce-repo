@@ -35,13 +35,20 @@ Frontend (run from `frontend/`) — **pnpm only** (npm/yarn are blocked by the
 - Frontend typechecks and builds (**verified**: `pnpm build` exits 0). Routing is
   file-based under `src/routes/` (see below), not the old `src/routes.tsx`.
 - `pnpm test` runs `vitest run`, but there are **no test files and no vitest config**, so it exits 1.
-- Backend tests pass (30 tests). `tests/conftest.py` builds the schema with
+- Backend tests pass (31 tests). `tests/conftest.py` builds the schema with
   `Base.metadata.create_all`, **not** Alembic, and overrides env vars before app import.
-- Only one Alembic revision exists (`migrations/versions/5d98e9df63ca_initial_schema.py`).
-- `psycopg` is excluded on Windows (`platform_system != 'Windows'`), so Windows dev
-  uses the default `sqlite:///./erp_dev.db`.
-- `CreatedByMixin` gained a `blamable` boolean column (`app/db/base.py`) with **no Alembic
-  migration yet** — tests use `create_all` so they pass, but Postgres needs `alembic revision --autogenerate`.
+- Two Alembic revisions exist: `5d98e9df63ca_initial_schema.py` and
+  `649d352f339d_add_blamable_to_created_by_mixin.py` (adds `blamable` to 25 tables).
+- `psycopg[binary]` is a dependency on **all platforms now** (the old
+  `platform_system != 'Windows'` marker was removed), so Windows dev can target Postgres.
+  With no `DATABASE_URL`, the code default is still `sqlite:///./erp_dev.db`.
+- `backend/.env` may point at a **local PostgreSQL** (this machine runs the
+  `postgresql-x64-18` Windows service, not docker-compose). If the password contains
+  URL-reserved characters (`@`, `:`, `/`, `%`), percent-encode them in the URL (e.g. `@` →
+  `%40`); `migrations/env.py` escapes `%` for Alembic's ConfigParser interpolation.
+- **SQLite tests do not enforce `VARCHAR` length** (or other dialect constraints); Postgres
+  does. Postgres-only bugs (e.g. a string too long for a sized column) will **not** appear in
+  `uv run pytest` — run the API against Postgres for real end-to-end confidence.
 - Neither `backend/` nor `frontend/` has a `Dockerfile`, although `docker-compose.yml`
   declares `build:` contexts for both — so `docker compose build` cannot succeed as-is.
 

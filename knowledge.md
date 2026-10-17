@@ -13,13 +13,15 @@
 | Modules | `backend/app/modules/<name>/` – each has `router.py`, `service.py`, `models.py` (and `schemas.py` as needed) |
 | Services & repositories | `backend/app/modules/*/service.py` – **never commit**; the `get_db` dependency owns the single commit per request |
 | Models | `backend/app/db/models.py` + `backend/app/db/base_all.py` (new models must be imported here) |
-| DB / Migrations | `backend/migrations/` (Alembic); one initial revision exists |
+| DB / Migrations | `backend/migrations/` (Alembic); two revisions: initial schema + `blamable` columns |
 | Shared utilities | `backend/app/shared/money.py` (`money`/`qty`/`dec`), `backend/app/shared/numbering.py` (`allocate_number`), `backend/app/shared/idempotency.py` (`run_idempotent`) |
 | Exceptions | `backend/app/core/exceptions.py` – use `AppError` subclasses, not `HTTPException` |
 | Permissions | `backend/app/core/permissions.py` – catalog of permissions; enforce via `Depends(guard("<permission>"))` |
 | Companies / vendors | Customers **and** vendors live in `partners`; storefront/sales is `sales` served at `/storefront`; shipments are `fulfillment` served at `/shipments` |
+| Payroll | `backend/app/modules/payroll/` — `Employee`, `PayrollRun`, `Payslip` models; runs post one balanced GL entry (debit `6100` salaries expense, credit `2400` payroll payable + `2410` withholdings) via `accounting.post_journal_entry` with `source_type="payroll_run"`; routes at `/api/v1/payroll/…`; perms `payroll.manage` / `payroll.view` |
 | Frontend | `frontend/src/` – file-based routes in `src/routes/` (`_guest`/`_protected` layouts); feature modules in `src/features/<module>/`; auth in `src/auth/auth-context.tsx`; API client `src/lib/api-client.ts` (+ `src/lib/error-handling.ts`); query client `src/lib/query-client.ts` |
-| Tests | `backend/tests/` – 30 tests; SQLite via `conftest.py`; single Alembic revision test |
+| Frontend base CRUD | `src/hooks/use-list-state.ts` (`useListState` + pure `toListParams`/`toggleSort`/`listQueryKey`); `src/components/data-table.tsx` (`ServerDataTable` — sortable headers, debounced search, filters/actions slots, pagination footer); `src/components/crud-form.tsx` (`useCrudForm` + `CrudFormModal`, zod-validated); reference consumer `src/features/payroll/EmployeesPage.tsx` |
+| Tests | `backend/tests/` – 31 tests; SQLite via `conftest.py` (does **not** enforce VARCHAR length, so Postgres-only bugs slip through) |
 
 ## Commands
 **Backend (run from `backend/`):**
@@ -33,7 +35,7 @@
 - `corepack enable` then `pnpm install` – install dependencies (npm/yarn are blocked by `scripts/ensure-pnpm.mjs`)
 - `pnpm dev` – Vite at `:5173`, proxies `/api` → `http://localhost:8000`
 - `pnpm build` – `vite build && tsc -b` (vite regenerates `routeTree.gen.ts`)
-- `pnpm test` – `vitest run` (no test files yet)
+- `pnpm test` – `vitest run` (config `frontend/vitest.config.ts`; unit tests colocated as `src/**/*.test.ts`, e.g. `use-list-state.test.ts`)
 
 ## Notable Conventions & Gotchas
 - **No floats**: always use `app/shared/money.py` (`money`/`qty`/`dec`).
@@ -45,8 +47,10 @@
 - **Permissions catalog**: `app/core/permissions.py`. Use `Depends(guard("<permission>"))`.
 - **Route naming mismatches vs AGENT.md**: customers & vendors → `partners`; storefront/sales → `sales` at `/storefront`; shipments → `fulfillment` at `/shipments`.
 - **Frontend uses pnpm only** (npm/yarn blocked by `frontend/scripts/ensure-pnpm.mjs`; `packageManager` pins pnpm). It typechecks and builds: `pnpm build` exits 0. Routes are file-based under `src/routes/`; every select uses `SheetSelect`.
-- **Windows dev**: `psycopg` excluded on Windows, so default `sqlite:///./erp_dev.db` is used.
-- **Alembic**: only one revision exists (`migrations/versions/5d98e9df63ca_initial_schema.py`); any new model requires import in `base_all.py` + new revision.
+- **Local Postgres**: `psycopg[binary]` is installed on all platforms now (the Windows marker was removed). This machine uses the `postgresql-x64-18` Windows service (not docker-compose); `.env` points at `postgresql+psycopg://erp:...@localhost:5432/erp`. Percent-encode URL-reserved chars in the password (`@` → `%40`). If no `DATABASE_URL`, code defaults to `sqlite:///./erp_dev.db`.
+- **Alembic**: two revisions exist (`5d98e9df63ca_initial_schema.py`, `649d352f339d_add_blamable_to_created_by_mixin.py`); any new model requires import in `base_all.py` + new revision. `migrations/env.py` escapes `%` for ConfigParser.
+- **Payroll rules**: one run per company/period (cancelled runs free the period); posted runs cannot be cancelled (reverse the journal instead); totals are recomputed from payslips at post time; seed creates 3 demo employees + a draft run for the current month.
+- **Server-side list contract** (use for every CRUD list): backend `app/shared/pagination.py` — `ListParams` FastAPI dependency (`page`, `page_size`, `search`, `sort`, `order=asc|desc`) + `apply_list()` (search via OR-ed `ilike`, sort fields **allowlisted** — unknown → `INVALID_SORT_FIELD` 400) + `paginate()` → envelope `{items, total, page, page_size}`. Frontend: drive it with `useListState()` + `ServerDataTable`; include `listQueryKey(list)` in TanStack query keys and invalidate the feature root after mutations.
 - **Env vars**: `DATABASE_URL` for Alembic; `ALEMBIC_DATABASE_URL` to override. `.env.example` present.
 - **Docker**: `docker-compose.yml` brings up postgres 16, redis 7, `api`, `web`. The `web` service uses pnpm (`corepack enable && pnpm install --frozen-lockfile && pnpm run dev`). Note neither service has a `Dockerfile` yet, so `build:` fails as-is.
 

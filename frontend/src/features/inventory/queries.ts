@@ -9,11 +9,13 @@ import {
   fetchOnHand,
   fetchProductOptions,
   fetchReconcile,
+  fetchSerials,
   fetchValuation,
   postCount,
   transferStock,
   type LedgerFilters,
   type OnHandFilters,
+  type SerialFilters,
 } from "./api";
 import type { AdjustmentPayload, TransferPayload } from "./schemas";
 
@@ -23,6 +25,7 @@ export const inventoryKeys = {
   ledger: (filters: LedgerFilters) => [...inventoryKeys.all, "ledger", filters] as const,
   valuation: () => [...inventoryKeys.all, "valuation"] as const,
   reconcile: () => [...inventoryKeys.all, "reconcile"] as const,
+  serials: (filters: SerialFilters) => [...inventoryKeys.all, "serials", filters] as const,
   count: (id: string) => [...inventoryKeys.all, "count", id] as const,
   productOptions: () => ["catalog", "products", "options"] as const,
   locationOptions: () => ["storage", "locations", "options"] as const,
@@ -53,6 +56,13 @@ export function reconcileQueryOptions() {
   return queryOptions({
     queryKey: inventoryKeys.reconcile(),
     queryFn: fetchReconcile,
+  });
+}
+
+export function serialsQueryOptions(filters: SerialFilters = {}) {
+  return queryOptions({
+    queryKey: inventoryKeys.serials(filters),
+    queryFn: () => fetchSerials(filters),
   });
 }
 

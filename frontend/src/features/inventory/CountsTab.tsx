@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { isStockableType } from "../../lib/location-types";
 import {
   Badge,
   Button,
@@ -77,7 +78,7 @@ export function CountsTab() {
   const binOptions = useMemo(
     () =>
       (locations.data ?? [])
-        .filter((l) => l.location_type === "bin")
+        .filter((l) => isStockableType(l.location_type))
         .map((l) => ({ value: l.id, label: `${l.code} — ${l.name}` })),
     [locations.data],
   );

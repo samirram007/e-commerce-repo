@@ -3,6 +3,7 @@ import {
   createAccount,
   createJournalEntry,
   fetchAccounts,
+  seedDefaultAccounts,
   fetchBalanceSheet,
   fetchGeneralLedger,
   fetchJournalEntries,
@@ -11,19 +12,21 @@ import {
   fetchTrialBalance,
   reverseJournalEntry,
   type DateRange,
+  type FiscalFilter,
 } from "./api";
 import type { AccountPayload, JournalPayload } from "./schemas";
 
 export const accountingKeys = {
   all: ["accounting"] as const,
   accounts: () => [...accountingKeys.all, "accounts"] as const,
-  journals: () => [...accountingKeys.all, "journals"] as const,
+  journals: (filter: FiscalFilter) => [...accountingKeys.all, "journals", filter] as const,
   journal: (id: string) => [...accountingKeys.all, "journal", id] as const,
-  trialBalance: (range: DateRange) => [...accountingKeys.all, "trial-balance", range] as const,
+  trialBalance: (range: DateRange & FiscalFilter) =>
+    [...accountingKeys.all, "trial-balance", range] as const,
   profitAndLoss: (fromDate: string, toDate: string) =>
     [...accountingKeys.all, "profit-and-loss", fromDate, toDate] as const,
   balanceSheet: (asOf: string) => [...accountingKeys.all, "balance-sheet", asOf] as const,
-  generalLedger: (params: DateRange & { accountCode?: string }) =>
+  generalLedger: (params: DateRange & FiscalFilter & { accountCode?: string }) =>
     [...accountingKeys.all, "general-ledger", params] as const,
 };
 
@@ -31,8 +34,11 @@ export function accountsQueryOptions() {
   return queryOptions({ queryKey: accountingKeys.accounts(), queryFn: fetchAccounts });
 }
 
-export function journalEntriesQueryOptions() {
-  return queryOptions({ queryKey: accountingKeys.journals(), queryFn: fetchJournalEntries });
+export function journalEntriesQueryOptions(filter: FiscalFilter = {}) {
+  return queryOptions({
+    queryKey: accountingKeys.journals(filter),
+    queryFn: () => fetchJournalEntries(filter.fiscalYearId),
+  });
 }
 
 export function journalEntryQueryOptions(id: string) {
@@ -43,7 +49,7 @@ export function journalEntryQueryOptions(id: string) {
   });
 }
 
-export function trialBalanceQueryOptions(range: DateRange = {}) {
+export function trialBalanceQueryOptions(range: DateRange & FiscalFilter = {}) {
   return queryOptions({
     queryKey: accountingKeys.trialBalance(range),
     queryFn: () => fetchTrialBalance(range),
@@ -66,7 +72,9 @@ export function balanceSheetQueryOptions(asOf: string) {
   });
 }
 
-export function generalLedgerQueryOptions(params: DateRange & { accountCode?: string } = {}) {
+export function generalLedgerQueryOptions(
+  params: DateRange & FiscalFilter & { accountCode?: string } = {},
+) {
   return queryOptions({
     queryKey: accountingKeys.generalLedger(params),
     queryFn: () => fetchGeneralLedger(params),
@@ -77,6 +85,14 @@ export function useCreateAccount() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: AccountPayload) => createAccount(input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: accountingKeys.accounts() }),
+  });
+}
+
+export function useSeedDefaultAccounts() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: seedDefaultAccounts,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: accountingKeys.accounts() }),
   });
 }

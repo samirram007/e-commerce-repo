@@ -48,6 +48,26 @@ export const valuationListSchema = z.array(valuationRowSchema);
 export const reconcileSchema = z.object({ balanced: z.boolean() });
 export type Reconcile = z.infer<typeof reconcileSchema>;
 
+export const SERIAL_STATUSES = ["in_stock", "issued"] as const;
+export type SerialStatus = (typeof SERIAL_STATUSES)[number];
+
+export const serialRowSchema = z.object({
+  id: z.string(),
+  product_id: z.string(),
+  sku: z.string(),
+  location_id: z.string(),
+  location_code: z.string(),
+  batch_ref: z.string().nullable(),
+  serial_number: z.string(),
+  status: z.string(),
+  source_type: z.string().nullable(),
+  source_id: z.string().nullable(),
+  created_at: z.string(),
+  issued_at: z.string().nullable(),
+});
+export type SerialRow = z.infer<typeof serialRowSchema>;
+export const serialListSchema = z.array(serialRowSchema);
+
 export const countLineSchema = z.object({
   id: z.string(),
   product_id: z.string(),
@@ -97,6 +117,8 @@ export const productOptionSchema = z.object({
   id: z.string(),
   sku: z.string(),
   name: z.string(),
+  track_batches: z.boolean().optional(),
+  track_serials: z.boolean().optional(),
 });
 export type ProductOption = z.infer<typeof productOptionSchema>;
 export const productOptionListSchema = z.object({

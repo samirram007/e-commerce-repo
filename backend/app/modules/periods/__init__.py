@@ -1,0 +1,1 @@
+"""Period context module."""

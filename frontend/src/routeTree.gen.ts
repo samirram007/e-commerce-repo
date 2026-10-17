@@ -21,12 +21,14 @@ import { Route as ProtectedInvoicesRouteImport } from './routes/_protected/invoi
 import { Route as ProtectedOrdersRouteImport } from './routes/_protected/orders'
 import { Route as ProtectedPartnersRouteImport } from './routes/_protected/partners'
 import { Route as ProtectedPaymentsRouteImport } from './routes/_protected/payments'
+import { Route as ProtectedPayrollRouteImport } from './routes/_protected/payroll'
 import { Route as ProtectedProductsRouteImport } from './routes/_protected/products'
 import { Route as ProtectedPurchaseOrdersRouteImport } from './routes/_protected/purchase-orders'
 import { Route as ProtectedReportsRouteImport } from './routes/_protected/reports'
 import { Route as ProtectedReturnsRouteImport } from './routes/_protected/returns'
 import { Route as ProtectedRolesRouteImport } from './routes/_protected/roles'
 import { Route as ProtectedSettingsRouteImport } from './routes/_protected/settings'
+import { Route as ProtectedSetupRouteImport } from './routes/_protected/setup'
 import { Route as ProtectedShipmentsRouteImport } from './routes/_protected/shipments'
 import { Route as ProtectedUsersRouteImport } from './routes/_protected/users'
 
@@ -88,6 +90,11 @@ const ProtectedPaymentsRoute = ProtectedPaymentsRouteImport.update({
   path: '/payments',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedPayrollRoute = ProtectedPayrollRouteImport.update({
+  id: '/payroll',
+  path: '/payroll',
+  getParentRoute: () => ProtectedRoute,
+} as any)
 const ProtectedProductsRoute = ProtectedProductsRouteImport.update({
   id: '/products',
   path: '/products',
@@ -118,6 +125,11 @@ const ProtectedSettingsRoute = ProtectedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedSetupRoute = ProtectedSetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => ProtectedRoute,
+} as any)
 const ProtectedShipmentsRoute = ProtectedShipmentsRouteImport.update({
   id: '/shipments',
   path: '/shipments',
@@ -140,12 +152,14 @@ export interface FileRoutesByFullPath {
   '/orders': typeof ProtectedOrdersRoute
   '/partners': typeof ProtectedPartnersRoute
   '/payments': typeof ProtectedPaymentsRoute
+  '/payroll': typeof ProtectedPayrollRoute
   '/products': typeof ProtectedProductsRoute
   '/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/reports': typeof ProtectedReportsRoute
   '/returns': typeof ProtectedReturnsRoute
   '/roles': typeof ProtectedRolesRoute
   '/settings': typeof ProtectedSettingsRoute
+  '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
   '/users': typeof ProtectedUsersRoute
 }
@@ -160,12 +174,14 @@ export interface FileRoutesByTo {
   '/orders': typeof ProtectedOrdersRoute
   '/partners': typeof ProtectedPartnersRoute
   '/payments': typeof ProtectedPaymentsRoute
+  '/payroll': typeof ProtectedPayrollRoute
   '/products': typeof ProtectedProductsRoute
   '/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/reports': typeof ProtectedReportsRoute
   '/returns': typeof ProtectedReturnsRoute
   '/roles': typeof ProtectedRolesRoute
   '/settings': typeof ProtectedSettingsRoute
+  '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
   '/users': typeof ProtectedUsersRoute
 }
@@ -182,12 +198,14 @@ export interface FileRoutesById {
   '/_protected/orders': typeof ProtectedOrdersRoute
   '/_protected/partners': typeof ProtectedPartnersRoute
   '/_protected/payments': typeof ProtectedPaymentsRoute
+  '/_protected/payroll': typeof ProtectedPayrollRoute
   '/_protected/products': typeof ProtectedProductsRoute
   '/_protected/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/_protected/reports': typeof ProtectedReportsRoute
   '/_protected/returns': typeof ProtectedReturnsRoute
   '/_protected/roles': typeof ProtectedRolesRoute
   '/_protected/settings': typeof ProtectedSettingsRoute
+  '/_protected/setup': typeof ProtectedSetupRoute
   '/_protected/shipments': typeof ProtectedShipmentsRoute
   '/_protected/users': typeof ProtectedUsersRoute
   '/_protected/': typeof ProtectedIndexRoute
@@ -205,12 +223,14 @@ export interface FileRouteTypes {
     | '/orders'
     | '/partners'
     | '/payments'
+    | '/payroll'
     | '/products'
     | '/purchase-orders'
     | '/reports'
     | '/returns'
     | '/roles'
     | '/settings'
+    | '/setup'
     | '/shipments'
     | '/users'
   fileRoutesByTo: FileRoutesByTo
@@ -225,12 +245,14 @@ export interface FileRouteTypes {
     | '/orders'
     | '/partners'
     | '/payments'
+    | '/payroll'
     | '/products'
     | '/purchase-orders'
     | '/reports'
     | '/returns'
     | '/roles'
     | '/settings'
+    | '/setup'
     | '/shipments'
     | '/users'
   id:
@@ -246,12 +268,14 @@ export interface FileRouteTypes {
     | '/_protected/orders'
     | '/_protected/partners'
     | '/_protected/payments'
+    | '/_protected/payroll'
     | '/_protected/products'
     | '/_protected/purchase-orders'
     | '/_protected/reports'
     | '/_protected/returns'
     | '/_protected/roles'
     | '/_protected/settings'
+    | '/_protected/setup'
     | '/_protected/shipments'
     | '/_protected/users'
     | '/_protected/'
@@ -349,6 +373,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedPaymentsRouteImport
       parentRoute: typeof ProtectedRoute
     }
+    '/_protected/payroll': {
+      id: '/_protected/payroll'
+      path: '/payroll'
+      fullPath: '/payroll'
+      preLoaderRoute: typeof ProtectedPayrollRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
     '/_protected/products': {
       id: '/_protected/products'
       path: '/products'
@@ -391,6 +422,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedSettingsRouteImport
       parentRoute: typeof ProtectedRoute
     }
+    '/_protected/setup': {
+      id: '/_protected/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof ProtectedSetupRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
     '/_protected/shipments': {
       id: '/_protected/shipments'
       path: '/shipments'
@@ -426,12 +464,14 @@ interface ProtectedRouteChildren {
   ProtectedOrdersRoute: typeof ProtectedOrdersRoute
   ProtectedPartnersRoute: typeof ProtectedPartnersRoute
   ProtectedPaymentsRoute: typeof ProtectedPaymentsRoute
+  ProtectedPayrollRoute: typeof ProtectedPayrollRoute
   ProtectedProductsRoute: typeof ProtectedProductsRoute
   ProtectedPurchaseOrdersRoute: typeof ProtectedPurchaseOrdersRoute
   ProtectedReportsRoute: typeof ProtectedReportsRoute
   ProtectedReturnsRoute: typeof ProtectedReturnsRoute
   ProtectedRolesRoute: typeof ProtectedRolesRoute
   ProtectedSettingsRoute: typeof ProtectedSettingsRoute
+  ProtectedSetupRoute: typeof ProtectedSetupRoute
   ProtectedShipmentsRoute: typeof ProtectedShipmentsRoute
   ProtectedUsersRoute: typeof ProtectedUsersRoute
   ProtectedIndexRoute: typeof ProtectedIndexRoute
@@ -445,12 +485,14 @@ const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedOrdersRoute: ProtectedOrdersRoute,
   ProtectedPartnersRoute: ProtectedPartnersRoute,
   ProtectedPaymentsRoute: ProtectedPaymentsRoute,
+  ProtectedPayrollRoute: ProtectedPayrollRoute,
   ProtectedProductsRoute: ProtectedProductsRoute,
   ProtectedPurchaseOrdersRoute: ProtectedPurchaseOrdersRoute,
   ProtectedReportsRoute: ProtectedReportsRoute,
   ProtectedReturnsRoute: ProtectedReturnsRoute,
   ProtectedRolesRoute: ProtectedRolesRoute,
   ProtectedSettingsRoute: ProtectedSettingsRoute,
+  ProtectedSetupRoute: ProtectedSetupRoute,
   ProtectedShipmentsRoute: ProtectedShipmentsRoute,
   ProtectedUsersRoute: ProtectedUsersRoute,
   ProtectedIndexRoute: ProtectedIndexRoute,

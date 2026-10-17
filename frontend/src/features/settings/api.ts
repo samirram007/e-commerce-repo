@@ -1,9 +1,14 @@
+import { z } from "zod";
 import { api } from "../../lib/api-client";
 import {
+  closeFiscalYearResultSchema,
   companyListSchema,
   companySchema,
   fiscalYearListSchema,
+  fiscalYearPeriodListSchema,
   fiscalYearSchema,
+  forwardFiscalYearResultSchema,
+  openingBalancesResultSchema,
   storageLocationListSchema,
   storageLocationSchema,
   taxRateListSchema,
@@ -11,8 +16,13 @@ import {
   type Company,
   type CompanyCreatePayload,
   type CompanyUpdatePayload,
+  type CloseFiscalYearResult,
   type FiscalYear,
   type FiscalYearPayload,
+  type FiscalYearPeriod,
+  type ForwardFiscalYearResult,
+  type OpeningBalancesPayload,
+  type OpeningBalancesResult,
   type StorageLocation,
   type StorageLocationPayload,
   type TaxRate,
@@ -71,4 +81,40 @@ export async function fetchFiscalYears(): Promise<FiscalYear[]> {
 export async function createFiscalYear(input: FiscalYearPayload): Promise<FiscalYear> {
   const { data } = await api.post("/fiscal-years", input);
   return fiscalYearSchema.parse(data);
+}
+
+export async function fetchFiscalYearPeriods(fiscalYearId: string): Promise<FiscalYearPeriod[]> {
+  const { data } = await api.get(`/fiscal-years/${fiscalYearId}/periods`);
+  return fiscalYearPeriodListSchema.parse(data);
+}
+
+export async function closeAccountingPeriod(
+  fiscalYearId: string,
+  periodId: string,
+): Promise<{ id: string; is_open: boolean }> {
+  const { data } = await api.post(
+    `/fiscal-years/${fiscalYearId}/periods/${periodId}/close`,
+  );
+  return z.object({ id: z.string(), is_open: z.boolean() }).parse(data);
+}
+
+export async function closeFiscalYear(fiscalYearId: string): Promise<CloseFiscalYearResult> {
+  const { data } = await api.post(`/fiscal-years/${fiscalYearId}/close`);
+  return closeFiscalYearResultSchema.parse(data);
+}
+
+export async function forwardFiscalYear(fiscalYearId: string): Promise<ForwardFiscalYearResult> {
+  const { data } = await api.post(`/fiscal-years/${fiscalYearId}/forward`);
+  return forwardFiscalYearResultSchema.parse(data);
+}
+
+export async function postOpeningBalances(
+  fiscalYearId: string,
+  input: OpeningBalancesPayload,
+): Promise<OpeningBalancesResult> {
+  const { data } = await api.post(
+    `/fiscal-years/${fiscalYearId}/opening-balances`,
+    input,
+  );
+  return openingBalancesResultSchema.parse(data);
 }

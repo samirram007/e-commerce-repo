@@ -95,3 +95,46 @@ def test_closed_period_rejects_posting(client, auth_headers, company_id):
     )
     assert resp.status_code == 400
     assert resp.json()["error"]["code"] == "PERIOD_CLOSED"
+
+
+def test_journal_entry_snapshots_fiscal_year_and_filters(client, auth_headers):
+    resp = client.post("/api/v1/accounting/journal-entries", headers=auth_headers, json=_journal_payload())
+    assert resp.status_code == 201, resp.text
+    entry = resp.json()
+    assert entry["fiscal_year_id"], "posting must snapshot the resolved fiscal year"
+
+    fy_id = entry["fiscal_year_id"]
+
+    # Journal list filters on the stored snapshot.
+    listed = client.get(
+        "/api/v1/accounting/journal-entries",
+        headers=auth_headers,
+        params={"fiscal_year_id": fy_id},
+    )
+    assert listed.status_code == 200
+    assert any(e["id"] == entry["id"] for e in listed.json())
+
+    other = client.get(
+        "/api/v1/accounting/journal-entries",
+        headers=auth_headers,
+        params={"fiscal_year_id": "does-not-exist"},
+    )
+    assert other.status_code == 200
+    assert all(e["id"] != entry["id"] for e in other.json())
+
+    # Trial balance/ledger accept the same filter.
+    tb = client.get(
+        "/api/v1/accounting/reports/trial-balance",
+        headers=auth_headers,
+        params={"fiscal_year_id": fy_id},
+    )
+    assert tb.status_code == 200
+    assert len(tb.json()) > 0
+
+    tb_empty = client.get(
+        "/api/v1/accounting/reports/trial-balance",
+        headers=auth_headers,
+        params={"fiscal_year_id": "does-not-exist"},
+    )
+    assert tb_empty.status_code == 200
+    assert tb_empty.json() == []

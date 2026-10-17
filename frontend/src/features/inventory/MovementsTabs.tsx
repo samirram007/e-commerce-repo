@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Card, ErrorBanner, Field, Input, Modal, Textarea } from "../../components/ui";
 import { SheetSelect } from "../../components/sheet";
+import { isStockableType } from "../../lib/location-types";
 import { usePermissions } from "../../hooks/use-permissions";
 import { fieldErrors } from "../../lib/zod-utils";
 import {
@@ -22,7 +23,7 @@ function binOptionsOf(
   locations: { id: string; code: string; name: string; location_type: string }[] | undefined,
 ) {
   return (locations ?? [])
-    .filter((l) => l.location_type === "bin")
+    .filter((l) => isStockableType(l.location_type))
     .map((l) => ({ value: l.id, label: `${l.code} — ${l.name}` }));
 }
 

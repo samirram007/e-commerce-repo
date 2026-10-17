@@ -40,3 +40,29 @@ def test_logout_revokes_refresh_session(client, admin_headers):
     """Logout must decode the presented refresh cookie (no NameError) -> 204."""
     resp = client.post("/api/v1/auth/logout", headers=admin_headers)
     assert resp.status_code == 204, resp.text
+
+
+def test_refresh_session_jti_fits_column(client, admin_headers):
+    """Regression: the refresh-session jti must fit refresh_sessions.jti
+    VARCHAR(64). SQLite ignores the length, but Postgres rejects over-long
+    values, which broke login/refresh in production-like runs."""
+    from sqlalchemy import select
+
+    from app.core.security import decode_token
+    from app.db.session import get_session_factory
+    from app.modules.identity import service as svc
+    from app.modules.identity.models import User
+
+    factory = get_session_factory()
+    session = factory()
+    try:
+        user = session.scalar(select(User))
+        assert user is not None
+        token, refresh = svc.create_refresh_session(session, user)
+        session.commit()
+        assert len(refresh.jti) <= 64, "jti exceeds refresh_sessions.jti VARCHAR(64)"
+        payload = decode_token(token, expected_type="refresh")
+        assert payload["session_jti"] == refresh.jti
+    finally:
+        session.rollback()
+        session.close()

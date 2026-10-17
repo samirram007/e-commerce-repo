@@ -14,7 +14,7 @@ from app.db.base import Base, TimestampMixin
 DOC_TYPES = [
     "sales_order", "invoice", "credit_note", "purchase_order", "vendor_bill",
     "goods_receipt", "sales_return", "purchase_return", "receipt", "payment",
-    "journal_entry", "shipment", "stock_adjustment", "refund",
+    "journal_entry", "shipment", "stock_adjustment", "refund", "payroll_run",
 ]
 
 _NUM_REJECTED_DOC_TYPES = "INVALID_DOC_TYPE"

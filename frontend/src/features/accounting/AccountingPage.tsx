@@ -19,6 +19,7 @@ import {
 } from "../../components/ui";
 import { Sheet, SheetSelect } from "../../components/sheet";
 import { usePermissions } from "../../hooks/use-permissions";
+import { usePeriodContext } from "../periods/period-context";
 import { formatDate, formatMoney, titleCase } from "../../lib/format";
 import { fieldErrors } from "../../lib/zod-utils";
 import {
@@ -84,6 +85,10 @@ const EMPTY_ACCOUNT_FORM: AccountFormInput = {
 
 export function AccountingPage() {
   const { has } = usePermissions();
+  // The topbar fiscal-year switcher drives which entries the ledger/statement
+  // queries report on; the backend filters on the entry's posted FY snapshot.
+  const { fiscalYear } = usePeriodContext();
+  const fiscalYearId = fiscalYear?.id ?? null;
   const canManageAccounts = has("accounting.accounts.manage");
   const canPost = has("accounting.journal.post");
 
@@ -108,9 +113,13 @@ export function AccountingPage() {
   const [glTo, setGlTo] = useState("");
 
   const accounts = useQuery(accountsQueryOptions());
-  const journals = useQuery(journalEntriesQueryOptions());
+  const journals = useQuery(journalEntriesQueryOptions({ fiscalYearId: fiscalYearId ?? undefined }));
   const trialBalance = useQuery(
-    trialBalanceQueryOptions({ fromDate: tbFrom || undefined, toDate: tbTo || undefined }),
+    trialBalanceQueryOptions({
+      fromDate: tbFrom || undefined,
+      toDate: tbTo || undefined,
+      fiscalYearId: fiscalYearId ?? undefined,
+    }),
   );
   const pnl = useQuery(profitAndLossQueryOptions(pnlFrom, pnlTo));
   const balanceSheet = useQuery(balanceSheetQueryOptions(bsAsOf));
@@ -119,6 +128,7 @@ export function AccountingPage() {
       accountCode: glAccount ?? undefined,
       fromDate: glFrom || undefined,
       toDate: glTo || undefined,
+      fiscalYearId: fiscalYearId ?? undefined,
     }),
   );
 

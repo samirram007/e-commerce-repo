@@ -1,6 +1,8 @@
 import { useEffect } from "react";
 import { createFileRoute, Link, Outlet, redirect, useNavigate, useRouterState } from "@tanstack/react-router";
 import { SheetSelect } from "../components/sheet";
+import { ProfileMenu } from "../components/profile-menu";
+import { FiscalYearPicker } from "../features/periods/FiscalYearPicker";
 import { useAuth, ensureSession } from "../auth/auth-context";
 
 /**
@@ -32,8 +34,10 @@ type AppPath =
   | "/accounting"
   | "/reports"
   | "/audit"
+  | "/payroll"
   | "/users"
   | "/roles"
+  | "/setup"
   | "/settings";
 
 interface NavItem {
@@ -57,8 +61,10 @@ const NAV_LINKS: NavItem[] = [
   { to: "/accounting", label: "Accounting", permission: "accounting.journal.view" },
   { to: "/reports", label: "Reports", permission: "reports.view" },
   { to: "/audit", label: "Audit Log", permission: "audit.log.read" },
+  { to: "/payroll", label: "Payroll", permission: "payroll.view" },
   { to: "/users", label: "Users", permission: "platform.users.manage" },
   { to: "/roles", label: "Roles", permission: "platform.users.manage" },
+  { to: "/setup", label: "Setup", permission: "company.settings.manage" },
   { to: "/settings", label: "Settings", permission: "company.settings.manage" },
 ];
 
@@ -97,25 +103,17 @@ function CompanySwitcher(): React.JSX.Element | null {
 }
 
 function Topbar(): React.JSX.Element {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-
   return (
     <div className="topbar">
-      <div className="muted" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        Company: <CompanySwitcher />
+      <div className="topbar-filters">
+        <div className="muted" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          Company: <CompanySwitcher />
+        </div>
+        <div className="muted" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          Fiscal year: <FiscalYearPicker />
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <span className="muted">{user?.email}</span>
-        <button
-          className="secondary"
-          onClick={() => {
-            void logout().finally(() => navigate({ to: "/login" }));
-          }}
-        >
-          Sign out
-        </button>
-      </div>
+      <ProfileMenu />
     </div>
   );
 }
