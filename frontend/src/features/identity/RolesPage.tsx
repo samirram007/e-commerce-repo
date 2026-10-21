@@ -6,15 +6,11 @@ import {
   Card,
   DataTable,
   EmptyState,
-  ErrorBanner,
-  Field,
-  Input,
-  Modal,
   PageHeader,
   type Column,
 } from "../../components/ui";
+import { CrudFormModal, useCrudForm } from "../../components/crud-form";
 import { usePermissions } from "../../hooks/use-permissions";
-import { fieldErrors } from "../../lib/zod-utils";
 import { permissionCatalogQueryOptions, rolesQueryOptions, useCreateRole } from "./queries";
 import { roleCreateFormSchema, type Role, type RoleCreateFormInput } from "./schemas";
 
@@ -28,9 +24,20 @@ export function RolesPage() {
   const catalog = useQuery(permissionCatalogQueryOptions());
   const createRole = useCreateRole();
 
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<RoleCreateFormInput>(EMPTY_ROLE);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const form = useCrudForm({
+    schema: roleCreateFormSchema,
+    initialValues: EMPTY_ROLE,
+    onSubmit: (values) => {
+      createRole.mutate(values, {
+        onSuccess: () => {
+          setModalOpen(false);
+          form.reset(EMPTY_ROLE);
+        },
+      });
+    },
+  });
 
   const grouped = useMemo(() => {
     const groups = new Map<string, { key: string; label: string }[]>();
@@ -44,28 +51,15 @@ export function RolesPage() {
   }, [catalog.data]);
 
   function togglePermission(key: string) {
-    setForm((prev) => ({
-      ...prev,
-      permissions: prev.permissions.includes(key)
-        ? prev.permissions.filter((value) => value !== key)
-        : [...prev.permissions, key],
-    }));
+    form.setValue(
+      "permissions",
+      form.values.permissions.includes(key)
+        ? form.values.permissions.filter((value) => value !== key)
+        : [...form.values.permissions, key],
+    );
   }
 
-  function submit() {
-    const parsed = roleCreateFormSchema.safeParse(form);
-    if (!parsed.success) {
-      setErrors(fieldErrors(parsed.error));
-      return;
-    }
-    setErrors({});
-    createRole.mutate(parsed.data, {
-      onSuccess: () => {
-        setOpen(false);
-        setForm(EMPTY_ROLE);
-      },
-    });
-  }
+  const permissionsError = form.errors.permissions;
 
   const columns: Column<Role>[] = [
     {
@@ -103,7 +97,7 @@ export function RolesPage() {
       <PageHeader
         title="Roles"
         description="Permission bundles granted to company members"
-        actions={canManage ? <Button onClick={() => setOpen(true)}>New role</Button> : null}
+        actions={canManage ? <Button onClick={() => setModalOpen(true)}>New role</Button> : null}
       />
 
       <Card>
@@ -118,59 +112,50 @@ export function RolesPage() {
         />
       </Card>
 
-      <Modal
-        open={open}
+      <CrudFormModal
+        open={modalOpen}
         title="New role"
-        onClose={() => setOpen(false)}
+        form={form}
+        fields={[{ name: "name", label: "Role name", placeholder: "e.g. inventory_manager" }]}
+        onClose={() => setModalOpen(false)}
+        onSubmit={form.submit}
+        submitting={createRole.isPending}
+        error={createRole.error}
         wide
-        footer={
+        extra={
           <>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={submit} disabled={createRole.isPending}>
-              {createRole.isPending ? "Saving…" : "Create"}
-            </Button>
+            {permissionsError ? (
+              <div className="error-text" style={{ marginBottom: 8 }}>
+                {permissionsError}
+              </div>
+            ) : (
+              <div className="muted" style={{ marginBottom: 8 }}>
+                Pick the permissions this role should grant.
+              </div>
+            )}
+            {catalog.isLoading ? <div className="muted">Loading permissions…</div> : null}
+            {grouped.map(([area, permissions]) => (
+              <div key={area} style={{ marginBottom: 12 }}>
+                <div className="subtle" style={{ textTransform: "capitalize", marginBottom: 4 }}>
+                  {area}
+                </div>
+                <div className="toolbar">
+                  {permissions.map((permission) => (
+                    <label className="pill" key={permission.key}>
+                      <input
+                        type="checkbox"
+                        checked={form.values.permissions.includes(permission.key)}
+                        onChange={() => togglePermission(permission.key)}
+                      />
+                      {permission.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
           </>
         }
-      >
-        <ErrorBanner error={createRole.error} />
-        <Field label="Role name" error={errors.name}>
-          <Input
-            value={form.name}
-            onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-          />
-        </Field>
-        {errors.permissions ? (
-          <div className="error-text" style={{ marginBottom: 8 }}>
-            {errors.permissions}
-          </div>
-        ) : (
-          <div className="muted" style={{ marginBottom: 8 }}>
-            Pick the permissions this role should grant.
-          </div>
-        )}
-        {catalog.isLoading ? <div className="muted">Loading permissions…</div> : null}
-        {grouped.map(([area, permissions]) => (
-          <div key={area} style={{ marginBottom: 12 }}>
-            <div className="subtle" style={{ textTransform: "capitalize", marginBottom: 4 }}>
-              {area}
-            </div>
-            <div className="toolbar">
-              {permissions.map((permission) => (
-                <label className="pill" key={permission.key}>
-                  <input
-                    type="checkbox"
-                    checked={form.permissions.includes(permission.key)}
-                    onChange={() => togglePermission(permission.key)}
-                  />
-                  {permission.label}
-                </label>
-              ))}
-            </div>
-          </div>
-        ))}
-      </Modal>
+      />
     </>
   );
 }

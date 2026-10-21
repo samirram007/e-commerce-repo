@@ -61,7 +61,7 @@ function emptyForm(): PoFormInput {
     vendor_id: "",
     order_date: today(),
     expected_date: "",
-    currency: "USD",
+    currency: "INR",
     notes: "",
     lines: [emptyLine()],
   };

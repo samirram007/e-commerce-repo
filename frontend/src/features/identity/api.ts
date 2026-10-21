@@ -3,13 +3,14 @@ import {
   permissionCatalogSchema,
   roleListSchema,
   roleSchema,
-  userListSchema,
+  userPageSchema,
   userSchema,
   type PermissionCatalog,
   type Role,
   type RoleCreatePayload,
   type User,
   type UserCreatePayload,
+  type UserPage,
 } from "./schemas";
 
 /**
@@ -17,9 +18,9 @@ import {
  * (login/bootstrap/me/logout/refresh) is owned by `services/identity-helpers`.
  */
 
-export async function fetchUsers(): Promise<User[]> {
-  const { data } = await api.get("/users");
-  return userListSchema.parse(data);
+export async function fetchUsers(params: Record<string, string | number> = {}): Promise<UserPage> {
+  const { data } = await api.get("/users", { params });
+  return userPageSchema.parse(data);
 }
 
 export async function createUser(input: UserCreatePayload): Promise<User> {

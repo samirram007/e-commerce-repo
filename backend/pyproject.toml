@@ -15,6 +15,7 @@ dependencies = [
     "pyjwt>=2.8",
     "python-multipart>=0.0.9",
     "filetype>=1.2",
+    "psycopg[binary]>=3.3.6",
 ]
 
 [dependency-groups]
@@ -25,6 +26,11 @@ dev = [
 
 [tool.uv]
 package = false
+# pyyaml has no cp315 wheels, and uvicorn only needs it for `--config *.yaml`,
+# which this project never uses. Dropping it keeps the Python 3.15 venv
+# installable entirely from wheels (no MSVC build toolchain required).
+# It still installs on Python <= 3.14, where wheels exist.
+override-dependencies = ["pyyaml==6.0.3; python_version < '3.15'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

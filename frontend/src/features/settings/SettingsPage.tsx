@@ -19,6 +19,7 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { titleCase } from "../../lib/format";
 import { fieldErrors } from "../../lib/zod-utils";
 import { FiscalYearsTab } from "./FiscalYearsTab";
+import { AppearanceTab } from "./AppearanceTab";
 import {
   companiesQueryOptions,
   storageLocationsQueryOptions,
@@ -45,13 +46,14 @@ import {
   type TaxRateFormInput,
 } from "./schemas";
 
-type SettingsTab = "company" | "taxes" | "storage" | "fiscal";
+type SettingsTab = "appearance" | "company" | "taxes" | "storage" | "fiscal";
 
 const TABS: { key: SettingsTab; label: string }[] = [
+  { key: "appearance", label: "Appearance" },
   { key: "company", label: "Company" },
   { key: "taxes", label: "Tax rates" },
   { key: "storage", label: "Storage locations" },
-  { key: "fiscal", label: "Fiscal years" },
+  { key: "fiscal", label: "Fiscal years & periods" },
 ];
 
 export function SettingsPage() {
@@ -60,9 +62,10 @@ export function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        description="Company profile, tax rates, storage and fiscal calendars"
+        description="Appearance, company profile, tax rates, storage and fiscal calendars"
       />
       <Tabs tabs={TABS} active={tab} onChange={(key) => setTab(key)} />
+      {tab === "appearance" ? <AppearanceTab /> : null}
       {tab === "company" ? <CompanyTab /> : null}
       {tab === "taxes" ? <TaxRatesTab /> : null}
       {tab === "storage" ? <StorageTab /> : null}
@@ -76,9 +79,9 @@ export function SettingsPage() {
 const EMPTY_COMPANY_CREATE: CompanyCreateFormInput = {
   name: "",
   legal_name: "",
-  base_currency: "USD",
+  base_currency: "INR",
   timezone: "UTC",
-  locale: "en-US",
+  locale: "en-IN",
   address: "",
   tax_identifier: "",
 };
@@ -87,7 +90,7 @@ const EMPTY_COMPANY_UPDATE: CompanyUpdateFormInput = {
   name: "",
   legal_name: "",
   timezone: "UTC",
-  locale: "en-US",
+  locale: "en-IN",
   address: "",
   tax_identifier: "",
   allow_negative_stock: false,

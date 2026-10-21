@@ -41,9 +41,9 @@ const STEPS: { key: Step; label: string; title: string }[] = [
 const EMPTY_COMPANY_CREATE: CompanyCreateFormInput = {
   name: "",
   legal_name: "",
-  base_currency: "USD",
+  base_currency: "INR",
   timezone: "UTC",
-  locale: "en-US",
+  locale: "en-IN",
   address: "",
   tax_identifier: "",
 };

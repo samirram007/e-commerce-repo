@@ -432,15 +432,20 @@ def reserve_stock(
 def release_reservation(
     session: Session, *, company_id: str, product_id: str, quantity, source_type: str, source_id: str,
     actor_user_id: str | None = None,
-) -> Decimal:
-    """Release a prior reservation; returns the released total."""
+) -> list[tuple[str, str | None, Decimal]]:
+    """Release a prior reservation; returns the consumed-row plan as
+    (location_id, batch_ref, qty) tuples in the order the reserved rows were
+    consumed. Callers that issue stock (shipment fulfilment) follow this plan
+    so batch-tracked products decrement their batch row — an untargeted issue
+    against batch_ref=None would miss the batch rows and drive on-hand negative.
+    """
     quantity = q4(dec(quantity))
     rows = session.execute(
         select(StockOnHand).where(StockOnHand.company_id == company_id, StockOnHand.product_id == product_id)
     ).scalars().all()
     rows.sort(key=lambda r: dec(r.reserved), reverse=True)
     remaining = quantity
-    released = Decimal("0")
+    plan: list[tuple[str, str | None, Decimal]] = []
     for row in rows:
         if remaining <= 0:
             break
@@ -460,12 +465,12 @@ def release_reservation(
             source_id=source_id,
             created_by=actor_user_id,
         )
-        released += take
+        plan.append((row.location_id, row.batch_ref, q4(take)))
         remaining -= take
     if remaining > 0:
         raise BusinessRuleError("RESERVATION_MISMATCH", "Not enough reserved stock to release")
     session.flush()
-    return released
+    return plan
 
 
 # ---- transfers ----

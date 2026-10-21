@@ -20,6 +20,45 @@ from app.core.security import (
     verify_password,
 )
 from app.modules.identity.models import RefreshSession, Role, User, UserCompany
+from app.shared.pagination import ListParams, apply_list, paginate
+
+USERS_SEARCH_FIELDS = ("email", "full_name")
+USERS_SORTABLE_FIELDS = ("email", "full_name", "is_active", "is_platform_admin", "created_at")
+
+
+def list_users_page(
+    session: Session,
+    params: ListParams,
+    *,
+    is_active: bool | None = None,
+    is_platform_admin: bool | None = None,
+    role: str | None = None,
+) -> tuple[list[User], int]:
+    """Server-side paginated/searchable/sortable platform user list.
+
+    `role` matches a JSON role token on ANY company membership of the user
+    (quoted-token match, so "admin" never matches "company_admin").
+    """
+    stmt = select(User)
+    if is_active is not None:
+        stmt = stmt.where(User.is_active.is_(is_active))
+    if is_platform_admin is not None:
+        stmt = stmt.where(User.is_platform_admin.is_(is_platform_admin))
+    if role:
+        membership = select(UserCompany).where(
+            UserCompany.user_id == User.id,
+            UserCompany.role_names.ilike(f'%"{role}"%'),
+        )
+        stmt = stmt.where(membership.exists())
+    stmt = apply_list(
+        stmt,
+        User,
+        params,
+        search_fields=USERS_SEARCH_FIELDS,
+        sortable_fields=USERS_SORTABLE_FIELDS,
+        default_sort=("email", False),
+    )
+    return paginate(session, stmt, params)
 
 
 def count_users(session: Session) -> int:
@@ -114,7 +153,12 @@ def rotate_refresh_token(session: Session, refresh_token: str) -> tuple[User, st
     payload = decode_token(refresh_token, expected_type="refresh")
     jti = payload.get("session_jti", "")
     sess = session.scalar(select(RefreshSession).where(RefreshSession.jti == jti))
-    if sess is None or sess.revoked_at is not None or sess.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+    # Postgres returns tz-aware datetimes, SQLite returns naive ones; normalize
+    # to UTC-aware before comparing so the check works on both backends.
+    expires_at = sess.expires_at if sess is not None else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if sess is None or sess.revoked_at is not None or expires_at <= datetime.now(timezone.utc):
         raise AuthError("invalid_refresh", "Refresh session is invalid or expired", status_code=401)
     user = session.get(User, payload["sub"]) or session.get(User, payload.get("sub"))
     if user is None or not user.is_active:

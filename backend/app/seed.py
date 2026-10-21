@@ -1,8 +1,15 @@
 """Seed demo data: run `python -m app.seed` (or via docker-compose) after
 migrations. Creates the platform admin, a demo company with its chart of
 accounts and fiscal year, a warehouse, and sample master data.
+
+The demo layer (users, catalog, partners, stock, orders, shipments) is
+idempotent and re-runnable: every entity is guarded by a natural key
+(email, SKU, customer code, order marker), so `python -m app.seed` tops up an
+existing database instead of duplicating it.
 """
 import logging
+from datetime import date, timedelta
+from decimal import Decimal
 
 from app.core.config import get_settings
 from app.db.session import get_session_factory
@@ -53,16 +60,21 @@ def run_seed() -> None:
                 session,
                 name="Demo Retail Co",
                 legal_name="Demo Retail Company Ltd",
-                base_currency="USD",
+                base_currency="INR",
                 owner_user_id=admin.id,
             )
             created_company = True
         session.commit()
 
+        # Currency + public storefront settings for the demo company.
+        companies.ensure_currency(session, "INR", "Indian Rupee")
+        if not company.storefront_slug:
+            company.storefront_slug = "default"
+        company.allow_guest_checkout = True
+        session.flush()
+
         if settings.seed_demo_data:
             # fiscal year covering this and the next calendar year
-            from datetime import date
-
             fy = fiscal.resolve_fiscal_year(session, company_id=company.id, on_date=date.today())
             if fy is None:
                 fiscal.create_fiscal_year(
@@ -72,6 +84,7 @@ def run_seed() -> None:
                     end_date=date(date.today().year + 1, 12, 31),
                     actor_user_id=admin.id,
                 )
+                fy = fiscal.resolve_fiscal_year(session, company_id=company.id, on_date=date.today())
             create_default_chart(session, company=company)
             if taxes.default_sales_tax_id(session, company.id) is None:
                 session.commit()
@@ -100,35 +113,27 @@ def run_seed() -> None:
                 zone = storage.create_location(session, company_id=company.id, actor_user_id=admin.id, code="Z1", name="Zone 1", location_type="zone", parent_id=wh.id)
                 bin1 = storage.create_location(session, company_id=company.id, actor_user_id=admin.id, code="Z1-B1", name="Bin 1", location_type="bin", parent_id=zone.id)
                 _ = bin1
-            if created_company:
-                for sku, name, cost, price in [
-                    ("SKU-001", "Demo Widget Small", 8.0, 19.99),
-                    ("SKU-002", "Demo Widget Large", 14.5, 34.9),
-                    ("SKU-SVC", "Delivery Service", 0, 9.99),
-                ]:
-                    if not catalog.list_products(session, company.id, search=sku):
-                        catalog.create_product(
-                            session,
-                            company_id=company.id,
-                            actor_user_id=admin.id,
-                            data={
-                                "sku": sku,
-                                "name": name,
-                                "stock_type": "service" if sku.endswith("SVC") else "stock",
-                                "base_cost": str(cost),
-                                "base_price": str(price),
-                                "is_sellable": True,
-                            },
-                        )
-                partners.create_customer(
+            demo_bin = next(
+                (loc for loc in storage.list_locations(session, company.id) if loc.location_type == "bin"),
+                None,
+            )
+            if demo_bin is None and demo_warehouse is not None:
+                zone = storage.create_location(
                     session, company_id=company.id, actor_user_id=admin.id,
-                    data={"code": "C-001", "name": "Demo Customer", "email": "customer@example.com"},
+                    code="Z1", name="Zone 1", location_type="zone", parent_id=demo_warehouse.id,
                 )
-                partners.create_vendor(
+                demo_bin = storage.create_location(
                     session, company_id=company.id, actor_user_id=admin.id,
-                    data={"code": "V-001", "name": "Demo Vendor", "email": "vendor@example.com"},
+                    code="Z1-B1", name="Bin 1", location_type="bin", parent_id=zone.id,
                 )
 
+            # Idempotent demo layer: runs on first seed AND on top-ups.
+            _seed_demo_users(session, company, admin, settings.seed_admin_password)
+            _seed_demo_catalog(session, company, admin)
+            _seed_demo_partners(session, company, admin)
+            _seed_storefront_zones(session, company, admin)
+
+            if created_company:
                 # demo payroll: three employees + a draft run for the current month
                 if not payroll.list_employees(session, company.id):
                     for code, first, last, salary, allowances, deduction in [
@@ -148,8 +153,6 @@ def run_seed() -> None:
                                 "deduction_rate": deduction,
                             },
                         )
-                    from datetime import date
-
                     today = date.today()
                     existing = [
                         r
@@ -171,6 +174,9 @@ def run_seed() -> None:
                             today.year,
                             today.month,
                         )
+
+            _seed_demo_stock(session, company, admin, demo_bin)
+            _seed_demo_orders(session, company, admin, floor_date=fy.start_date)
             session.commit()
         logger.info("seed complete")
     except Exception:
@@ -178,6 +184,476 @@ def run_seed() -> None:
         raise
     finally:
         session.close()
+
+
+def _seed_demo_users(session, company, admin, password: str) -> None:
+    """Demo logins across every role so the users list (search, status and
+    role filters) and permission-scoped screens have real data to chew on."""
+    from sqlalchemy import select
+
+    from app.modules.identity.models import UserCompany
+
+    demo_users = [
+        # (email, full_name, is_platform_admin, role_names, is_company_admin, is_active)
+        ("root@demo.example.com", "Robin Root", True, ["admin"], True, True),
+        ("manager@demo.example.com", "Maya Manager", False, ["admin"], False, True),
+        ("accountant@demo.example.com", "Aaron Accountant", False, ["accountant"], False, True),
+        ("sales1@demo.example.com", "Sofia Sales", False, ["sales_agent"], False, True),
+        ("sales2@demo.example.com", "Sam Salesman", False, ["sales_agent"], False, True),
+        ("inventory@demo.example.com", "Ivan Inventory", False, ["inventory_manager"], False, True),
+        ("purchasing@demo.example.com", "Priya Purchasing", False, ["purchasing_agent"], False, True),
+        ("fulfillment@demo.example.com", "Felix Fulfillment", False, ["fulfillment_agent"], False, True),
+        ("viewer@demo.example.com", "Vera Viewer", False, ["other_user"], False, True),
+        ("contractor@demo.example.com", "Chris Contractor", False, ["other_user"], False, False),
+    ]
+    created = 0
+    for email, full_name, is_platform_admin, role_names, is_company_admin, is_active in demo_users:
+        user = identity.get_by_email(session, email)
+        if user is None:
+            user = identity.create_user(
+                session,
+                email=email,
+                password=password,
+                full_name=full_name,
+                is_platform_admin=is_platform_admin,
+            )
+            created += 1
+        if not is_active:
+            user.is_active = False
+        membership = session.scalar(
+            select(UserCompany).where(
+                UserCompany.user_id == user.id, UserCompany.company_id == company.id
+            )
+        )
+        if membership is None:
+            companies.grant_membership(
+                session,
+                company_id=company.id,
+                user_id=user.id,
+                is_company_admin=is_company_admin,
+                role_names=role_names,
+            )
+    if created:
+        logger.info("seeded %d demo users (password: %s)", created, password)
+
+
+# (sku, name, category_path, uom, stock_type, cost, price, barcode, batches, serials, active, sellable, purchasable)
+_DEMO_PRODUCTS = [
+    # original three (kept identical so existing databases match)
+    ("SKU-001", "Demo Widget Small", ("Accessories",), "PCS", "stock", "8.00", "19.99", "8901234000011", False, False, True, True, True),
+    ("SKU-002", "Demo Widget Large", ("Accessories",), "PCS", "stock", "14.50", "34.90", "8901234000028", False, False, True, True, True),
+    ("SKU-SVC", "Delivery Service", ("Services",), "HR", "service", "0", "9.99", None, False, False, True, True, False),
+    # phones (serial-tracked flagships + a plain model)
+    ("SKU-PHX-001", "Nova X Phone 128GB", ("Electronics", "Phones"), "PCS", "stock", "320.00", "499.00", "8901234000035", False, True, True, True, True),
+    ("SKU-PHX-002", "Nova X Phone 256GB", ("Electronics", "Phones"), "PCS", "stock", "390.00", "599.00", "8901234000042", False, True, True, True, True),
+    ("SKU-PHX-003", "Pixelmate A1 Phone", ("Electronics", "Phones"), "PCS", "stock", "120.00", "199.00", "8901234000059", False, False, True, True, True),
+    # laptops
+    ("SKU-LAP-001", "ZenBook 14 Laptop", ("Electronics", "Laptops"), "PCS", "stock", "650.00", "899.00", "8901234000066", False, True, True, True, True),
+    ("SKU-LAP-002", "ThinkPad Pro 15 Laptop", ("Electronics", "Laptops"), "PCS", "stock", "950.00", "1299.00", "8901234000073", False, True, True, True, True),
+    ("SKU-LAP-003", "Chromebook Go 11", ("Electronics", "Laptops"), "PCS", "stock", "150.00", "249.00", "8901234000080", False, False, True, True, True),
+    # accessories
+    ("SKU-ACC-001", "USB-C Cable 1m", ("Electronics", "Accessories"), "PCS", "stock", "4.50", "12.99", "8901234000097", False, False, True, True, True),
+    ("SKU-ACC-002", "Wireless Mouse", ("Electronics", "Accessories"), "PCS", "stock", "12.00", "29.50", "8901234000103", False, False, True, True, True),
+    ("SKU-ACC-003", 'Laptop Sleeve 14"', ("Electronics", "Accessories"), "PCS", "stock", "7.00", "19.99", None, False, False, True, True, True),
+    ("SKU-ACC-004", "65W USB-C Charger", ("Electronics", "Accessories"), "PCS", "stock", "16.00", "39.99", "8901234000110", False, False, True, True, True),
+    ("SKU-ACC-005", "Screen Protector Pack", ("Electronics", "Accessories"), "BOX", "stock", "1.80", "9.50", None, False, False, True, True, True),
+    ("SKU-ACC-006", "Bluetooth Earbuds", ("Electronics", "Accessories"), "PCS", "stock", "35.00", "79.99", "8901234000127", False, False, False, True, True),
+    ("SKU-ACC-007", "Internal Component Kit", ("Electronics", "Accessories"), "BOX", "stock", "22.00", "0.00", None, False, False, True, False, True),
+    # apparel
+    ("SKU-APP-001", "Cotton T-Shirt M", ("Apparel",), "PCS", "stock", "5.00", "14.99", "8901234000134", False, False, True, True, True),
+    ("SKU-APP-002", "Cotton T-Shirt L", ("Apparel",), "PCS", "stock", "5.00", "14.99", "8901234000141", False, False, True, True, True),
+    ("SKU-APP-003", "Denim Jeans", ("Apparel",), "PCS", "stock", "18.00", "44.99", "8901234000158", False, False, True, True, True),
+    ("SKU-APP-004", "Running Shoes Size 9", ("Apparel",), "PCS", "stock", "30.00", "69.99", "8901234000165", False, False, True, True, True),
+    ("SKU-APP-005", "Wool Beanie", ("Apparel",), "PCS", "stock", "3.50", "12.50", None, False, False, True, True, True),
+    # home & kitchen
+    ("SKU-HOM-001", "Stainless Kettle 1.7L", ("Home & Kitchen",), "PCS", "stock", "22.00", "49.99", "8901234000172", False, False, True, True, True),
+    ("SKU-HOM-002", "Non-Stick Pan 28cm", ("Home & Kitchen",), "PCS", "stock", "14.00", "34.50", "8901234000189", False, False, True, True, True),
+    ("SKU-HOM-003", "LED Desk Lamp", ("Home & Kitchen",), "PCS", "stock", "11.00", "27.99", None, False, False, True, True, True),
+    ("SKU-HOM-004", "Storage Box 40L", ("Home & Kitchen",), "PCS", "stock", "6.00", "18.99", None, False, False, True, True, True),
+    ("SKU-HOM-005", "Coffee Mug Set of 4", ("Home & Kitchen",), "BOX", "stock", "9.00", "24.99", "8901234000196", False, False, True, True, True),
+    # grocery (batch-tracked with expiry)
+    ("SKU-GRV-001", "Arabica Coffee Beans 1kg", ("Grocery",), "KG", "stock", "9.00", "18.99", "8901234000202", True, False, True, True, True),
+    ("SKU-GRV-002", "Green Tea 100 Bags", ("Grocery",), "BOX", "stock", "3.20", "8.99", None, True, False, True, True, True),
+    ("SKU-GRV-003", "Olive Oil 500ml", ("Grocery",), "PCS", "stock", "5.50", "12.50", "8901234000219", True, False, True, True, True),
+    ("SKU-GRV-004", "Basmati Rice 5kg", ("Grocery",), "BAG", "stock", "8.00", "16.99", None, True, False, True, True, True),
+    # services
+    ("SKU-SVC-002", "Installation Service", ("Services",), "HR", "service", "0", "49.00", None, False, False, True, True, False),
+    ("SKU-SVC-003", "Extended Warranty 1 Year", ("Services",), "PCS", "service", "0", "79.00", None, False, False, True, True, False),
+    ("SKU-SVC-004", "Gift Wrapping", ("Services",), "PCS", "service", "0", "4.99", None, False, False, True, True, False),
+]
+
+_DEMO_CATEGORIES = [
+    ("Electronics", None),
+    ("Phones", "Electronics"),
+    ("Laptops", "Electronics"),
+    ("Accessories", "Electronics"),
+    ("Apparel", None),
+    ("Home & Kitchen", None),
+    ("Grocery", None),
+    ("Services", None),
+]
+
+#: Demo prices were authored in USD; the store trades in INR, so scale them.
+_DEMO_USD_TO_INR = Decimal("85")
+
+
+def _to_inr(amount: str) -> str:
+    """Convert a demo USD price into a realistic INR amount."""
+    return str((Decimal(amount) * _DEMO_USD_TO_INR).quantize(Decimal("0.01")))
+
+
+#: (pincode, eta_days, cod_allowed) — demo delivery zones for the storefront.
+_DEMO_ZONES = [
+    ("560001", 2, True),
+    ("560002", 2, True),
+    ("560003", 3, True),
+    ("400001", 3, True),
+    ("110001", 4, False),
+    ("999999", 5, False),
+]
+
+
+def _seed_storefront_zones(session, company, admin) -> None:
+    """Demo pincode delivery zones so the storefront pincode check resolves."""
+    from app.modules.storefront import service as storefront
+
+    for pincode, eta_days, cod_allowed in _DEMO_ZONES:
+        storefront.set_delivery_zone(
+            session,
+            company.id,
+            pincode=pincode,
+            deliverable=True,
+            eta_days=eta_days,
+            cod_allowed=cod_allowed,
+        )
+
+
+def _seed_demo_catalog(session, company, admin) -> None:
+    """Categories, UoMs and a wide product range spanning every filter axis:
+    category, stock type, batch/serial tracking, active and sellable flags."""
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from app.modules.catalog.models import Product
+
+    # categories (parent/child) — idempotent by name
+    existing = {c.name: c for c in catalog.list_categories(session, company.id)}
+    for name, parent in _DEMO_CATEGORIES:
+        if name in existing:
+            continue
+        created = catalog.create_category(
+            session, company_id=company.id, name=name,
+            parent_id=existing[parent].id if parent else None,
+        )
+        existing[name] = created
+    category_id = {name: row.id for name, row in existing.items()}
+
+    uom_id: dict[str, str] = {}
+    for code, name in [("PCS", "Piece"), ("BOX", "Box"), ("KG", "Kilogram"), ("HR", "Hour"), ("BAG", "Bag")]:
+        uom_id[code] = catalog.ensure_uom(session, company_id=company.id, code=code, name=name).id
+
+    skus = {
+        sku
+        for (sku,) in session.execute(
+            select(Product.sku).where(Product.company_id == company.id)
+        ).all()
+    }
+    created = 0
+    for (
+        sku, name, cat_path, uom, stock_type, cost, price, barcode, batches, serials, active, sellable, purchasable
+    ) in _DEMO_PRODUCTS:
+        if sku in skus:
+            continue
+        catalog.create_product(
+            session,
+            company_id=company.id,
+            actor_user_id=admin.id,
+            data={
+                "sku": sku,
+                "name": name,
+                "category_id": category_id[cat_path[-1]],
+                "uom_id": uom_id.get(uom),
+                "barcode": barcode,
+                "stock_type": stock_type,
+                "track_batches": batches,
+                "track_serials": serials,
+                "base_cost": _to_inr(cost),
+                "base_price": _to_inr(price),
+                "is_active": active,
+                "is_sellable": sellable,
+                "is_purchasable": purchasable,
+            },
+        )
+        created += 1
+    if created:
+        logger.info("seeded %d demo products", created)
+
+
+_DEMO_PARTNER_CUSTOMERS = [
+    # (code, name, email, phone, payment_term_days, credit_limit)
+    ("C-001", "Demo Customer", "customer@example.com", "+1 555 0100", 0, "0"),
+    ("C-002", "Alpha Traders", "orders@alphatraders.example.com", "+1 555 0101", 15, "5000"),
+    ("C-003", "Beta Retail Group", "ap@betaretail.example.com", "+1 555 0102", 30, "10000"),
+    ("C-004", "Globex Imports", "buying@globex.example.com", "+1 555 0103", 30, "15000"),
+    ("C-005", "Harbor Stores", "hello@harborstores.example.com", "+1 555 0104", 0, "2500"),
+    ("C-006", "Iris Boutique", "style@irisboutique.example.com", "+1 555 0105", 15, "3000"),
+    ("C-007", "Junction Mart", "orders@junctionmart.example.com", "+1 555 0106", 45, "12000"),
+    ("C-008", "Keystone Wholesale", "accounts@keystonewholesale.example.com", "+1 555 0107", 60, "25000"),
+    ("C-009", "Luminary Gifts", "gifts@luminary.example.com", "+1 555 0108", 0, "1500"),
+]
+
+_DEMO_PARTNER_VENDORS = [
+    # (code, name, email, phone)
+    ("V-001", "Demo Vendor", "vendor@example.com", "+1 555 0200"),
+    ("V-002", "Northwind Components", "sales@northwind.example.com", "+1 555 0201"),
+    ("V-003", "Pacific Textiles", "sales@pacifictextiles.example.com", "+1 555 0202"),
+    ("V-004", "Harvest Foods Wholesale", "orders@harvestfoods.example.com", "+1 555 0203"),
+]
+
+
+def _seed_demo_partners(session, company, admin) -> None:
+    """Customers and vendors across varied payment terms and credit limits —
+    guarded by their natural key (code)."""
+    from sqlalchemy import select
+
+    from app.modules.partners.models import Customer, Vendor
+
+    cust_codes = set(
+        session.scalars(select(Customer.code).where(Customer.company_id == company.id)).all()
+    )
+    created = 0
+    for code, name, email, phone, terms, credit in _DEMO_PARTNER_CUSTOMERS:
+        if code in cust_codes:
+            continue
+        partners.create_customer(
+            session,
+            company_id=company.id,
+            actor_user_id=admin.id,
+            data={
+                "code": code,
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "payment_term_days": terms,
+                "credit_limit": credit,
+            },
+        )
+        created += 1
+
+    vend_codes = set(
+        session.scalars(select(Vendor.code).where(Vendor.company_id == company.id)).all()
+    )
+    for code, name, email, phone in _DEMO_PARTNER_VENDORS:
+        if code in vend_codes:
+            continue
+        partners.create_vendor(
+            session,
+            company_id=company.id,
+            actor_user_id=admin.id,
+            data={"code": code, "name": name, "email": email, "phone": phone},
+        )
+        created += 1
+    if created:
+        logger.info("seeded %d demo customers/vendors", created)
+
+
+def _seed_demo_stock(session, company, admin, bin_location) -> None:
+    """Opening stock into the demo bin. Batch products carry a batch ref and
+    expiry date, serial products one serial per unit. Guarded per-SKU by the
+    seed ledger entries (source_type='seed', source_id='seed:<sku>')."""
+    from sqlalchemy import select
+
+    from app.modules.catalog.models import Product
+    from app.modules.inventory import service as inventory
+    from app.modules.inventory.models import StockLedgerEntry
+
+    if bin_location is None:
+        logger.warning("no bin location available — skipping demo stock")
+        return
+
+    products = {
+        p.sku: p
+        for p in session.execute(select(Product).where(Product.company_id == company.id)).scalars()
+    }
+    today = date.today()
+    received = 0
+    for (
+        sku, _name, _cat, _uom, stock_type, _cost, _price, _barcode, batches, serials, *_rest
+    ) in _DEMO_PRODUCTS:
+        if stock_type != "stock":
+            continue
+        product = products.get(sku)
+        if product is None:
+            continue
+        already = session.scalar(
+            select(StockLedgerEntry.id).where(
+                StockLedgerEntry.company_id == company.id,
+                StockLedgerEntry.source_type == "seed",
+                StockLedgerEntry.source_id == f"seed:{sku}",
+            )
+        )
+        if already:
+            continue
+        if serials:
+            qty = 10
+            serial_list = [f"{sku}-SN{i:04d}" for i in range(1, qty + 1)]
+        else:
+            # deterministic spread 60..360 in steps of 50, stable per SKU
+            qty = 60 + (sum(ord(c) for c in sku) % 7) * 50
+            serial_list = None
+        inventory.post_movement(
+            session,
+            company_id=company.id,
+            movement_type="receipt",
+            product_id=product.id,
+            location_id=bin_location.id,
+            quantity=qty,
+            unit_cost=product.base_cost,
+            batch_ref=f"{sku}-B01" if batches else None,
+            expiry_date=(today + timedelta(days=540)) if batches else None,
+            serials=serial_list,
+            source_type="seed",
+            source_id=f"seed:{sku}",
+            actor_user_id=admin.id,
+        )
+        received += 1
+    if received:
+        logger.info("received opening stock for %d products", received)
+
+
+# Each spec drives the real service path (cart -> checkout -> pay ->
+# shipment transitions). Orders are marked with notes "DEMO-ORDER nn" so
+# re-runs skip them; backdate is clamped to the fiscal year start.
+_DEMO_ORDERS = [
+    # pending payment (stock reserved, nothing shipped)
+    dict(customer="C-002", lines=[("SKU-PHX-001", 2), ("SKU-ACC-001", 2)], shipping="4.99", backdate=1),
+    dict(customer="C-003", lines=[("SKU-APP-001", 3)], shipping="0", backdate=0),
+    # paid, awaiting fulfillment
+    dict(customer="C-004", lines=[("SKU-LAP-001", 1), ("SKU-ACC-002", 1)], shipping="12.00", backdate=6, pay=True),
+    dict(customer="C-005", lines=[("SKU-001", 10), ("SKU-002", 4)], shipping="0", backdate=9, pay=True),
+    # shipment progression
+    dict(customer="C-006", lines=[("SKU-HOM-001", 2)], shipping="5.00", backdate=12, pay=True, ship="picking"),
+    dict(customer="C-007", lines=[("SKU-GRV-001", 6), ("SKU-GRV-002", 4)], shipping="5.00", backdate=14, pay=True, ship="picked"),
+    dict(customer="C-008", lines=[("SKU-ACC-004", 3), ("SKU-SVC-002", 1)], shipping="0", backdate=16, pay=True, ship="packed"),
+    dict(customer="C-009", lines=[("SKU-APP-003", 2), ("SKU-APP-005", 2)], shipping="5.00", backdate=18, pay=True, ship="packed"),
+    dict(customer="C-002", lines=[("SKU-HOM-002", 1)], shipping="5.00", backdate=20, pay=True, ship="dispatched"),
+    dict(customer="C-003", lines=[("SKU-GRV-003", 5)], shipping="5.00", backdate=22, pay=True, ship="in_transit"),
+    dict(customer="C-004", lines=[("SKU-LAP-002", 1), ("SKU-ACC-003", 2)], shipping="0", backdate=24, pay=True, ship="delivered"),
+    dict(customer="C-001", lines=[("SKU-001", 5), ("SKU-SVC", 1)], shipping="0", backdate=26, pay=True, ship="delivered"),
+    dict(customer="C-005", lines=[("SKU-HOM-003", 3), ("SKU-HOM-005", 1)], shipping="5.00", backdate=28, pay=True, ship="delivered"),
+    # exception paths
+    dict(customer="C-006", lines=[("SKU-APP-004", 1)], shipping="5.00", backdate=30, pay=True, ship="failed"),
+    dict(customer="C-007", lines=[("SKU-GRV-004", 2)], shipping="5.00", backdate=33, pay=True, ship="returned_to_origin"),
+    dict(customer="C-008", lines=[("SKU-ACC-005", 10)], shipping="0", backdate=2, cancel=True),
+]
+
+# shipment status walk starting from 'picking' (create_shipment's initial state)
+_SHIP_PATHS = {
+    "picking": [],
+    "picked": ["picked"],
+    "packed": ["picked", "packed"],
+    "dispatched": ["picked", "packed", "dispatched"],
+    "in_transit": ["picked", "packed", "dispatched", "in_transit"],
+    "delivered": ["picked", "packed", "dispatched", "in_transit", "delivered"],
+    "failed": ["picked", "packed", "dispatched", "in_transit", "failed"],
+    "returned_to_origin": ["picked", "packed", "dispatched", "in_transit", "failed", "returned_to_origin"],
+}
+
+
+def _seed_demo_orders(session, company, admin, *, floor_date: date) -> None:
+    """Orders across every reachable status, via the real sales/fulfillment
+    services so reservations, invoices, stock issues and GL stay consistent."""
+    from sqlalchemy import select
+
+    from app.modules.catalog.models import Product
+    from app.modules.fulfillment import service as fulfillment
+    from app.modules.partners.models import Customer
+    from app.modules.sales import service as sales
+    from app.modules.sales.models import SalesOrder
+
+    customers = {
+        c.code: c
+        for c in session.execute(select(Customer).where(Customer.company_id == company.id)).scalars()
+    }
+    products = {
+        p.sku: p
+        for p in session.execute(select(Product).where(Product.company_id == company.id)).scalars()
+    }
+
+    today = date.today()
+    max_backdate = max(0, (today - floor_date).days - 1)
+    created_count = 0
+    for index, spec in enumerate(_DEMO_ORDERS, start=1):
+        notes = f"DEMO-ORDER {index:02d}"
+        exists = session.scalar(
+            select(SalesOrder.id).where(
+                SalesOrder.company_id == company.id, SalesOrder.notes == notes
+            )
+        )
+        if exists:
+            continue
+        customer = customers.get(spec["customer"])
+        if customer is None:
+            logger.warning("customer %s missing; skipping %s", spec["customer"], notes)
+            continue
+
+        cart = sales.get_or_create_cart(
+            session, company_id=company.id, user_id=admin.id, customer_id=customer.id, token=None
+        )
+        for item in sales.cart_items(session, cart.id):
+            sales.remove_cart_item(session, cart, item.id)
+        for sku, line_qty in spec["lines"]:
+            product = products.get(sku)
+            if product is None:
+                raise RuntimeError(f"demo order {notes} references missing SKU {sku}")
+            sales.add_cart_item(session, cart, product.id, str(line_qty))
+
+        order, _replayed = sales.checkout_cart(
+            session,
+            company_id=company.id,
+            actor_user_id=admin.id,
+            cart_id=cart.id,
+            customer_id=customer.id,
+            shipping_address="221B Demo Street, Springfield",
+            billing_address=None,
+            shipping_total=spec["shipping"],
+            notes=notes,
+            idempotency_key=f"seed-order-{index:02d}",
+        )
+        # backdate before payment: the invoice date derives from order_date
+        backdate = min(spec.get("backdate", 0), max_backdate)
+        if backdate:
+            order.order_date = today - timedelta(days=backdate)
+            session.flush()
+
+        if spec.get("cancel"):
+            sales.cancel_order(session, order, admin.id)
+            created_count += 1
+            continue
+        if not spec.get("pay"):
+            created_count += 1
+            continue
+
+        sales.pay_order(
+            session,
+            company_id=company.id,
+            actor_user_id=admin.id,
+            order_id=order.id,
+            idempotency_key=f"seed-pay-{index:02d}",
+        )
+        target = spec.get("ship")
+        if target:
+            shipment = fulfillment.create_shipment(
+                session, company_id=company.id, actor_user_id=admin.id, order_id=order.id
+            )
+            for to_status in _SHIP_PATHS[target]:
+                fulfillment.transition_shipment(
+                    session, company.id, shipment.id, to_status, admin.id
+                )
+        created_count += 1
+    if created_count:
+        logger.info("seeded %d demo orders", created_count)
 
 
 if __name__ == "__main__":

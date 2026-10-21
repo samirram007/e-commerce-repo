@@ -31,7 +31,7 @@ class InvoiceLineIn(BaseModel):
 class InvoiceCreateIn(BaseModel):
     customer_id: str
     invoice_date: date
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str = Field(default="INR", min_length=3, max_length=3)
     shipping_total: Decimal = Decimal("0")
     due_date: date | None = None
     notes: str | None = None

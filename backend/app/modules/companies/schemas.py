@@ -8,9 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class CompanyCreateIn(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     legal_name: str = Field(default="", max_length=200)
-    base_currency: str = Field(default="USD", min_length=3, max_length=3)
+    base_currency: str = Field(default="INR", min_length=3, max_length=3)
     timezone: str = Field(default="UTC", max_length=64)
-    locale: str = Field(default="en-US", max_length=16)
+    locale: str = Field(default="en-IN", max_length=16)
     address: str | None = None
     tax_identifier: str | None = Field(default=None, max_length=64)
 

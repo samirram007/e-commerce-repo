@@ -154,6 +154,8 @@ def list_products(
     *,
     search: str | None = None,
     category_id: str | None = None,
+    stock_type: str | None = None,
+    is_active: bool | None = None,
     active_only: bool = False,
 ):
     stmt = select(Product).where(Product.company_id == company_id)
@@ -164,6 +166,10 @@ def list_products(
         )
     if category_id:
         stmt = stmt.where(Product.category_id == category_id)
+    if stock_type:
+        stmt = stmt.where(Product.stock_type == stock_type)
+    if is_active is not None:
+        stmt = stmt.where(Product.is_active.is_(is_active))
     if active_only:
         stmt = stmt.where(Product.is_active.is_(True))
     stmt = stmt.order_by(Product.sku)

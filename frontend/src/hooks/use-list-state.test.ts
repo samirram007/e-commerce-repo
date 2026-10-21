@@ -4,12 +4,12 @@ import { initialListState, listQueryKey, toListParams, toggleSort } from "./use-
 describe("toListParams", () => {
   it("always sends page and page_size", () => {
     const state = initialListState();
-    expect(toListParams(state)).toEqual({ page: 1, page_size: 25 });
+    expect(toListParams(state)).toEqual({ page: 1, page_size: 10 });
   });
 
   it("omits empty search and sort", () => {
     const state = { ...initialListState(), search: "   " };
-    expect(toListParams(state)).toEqual({ page: 1, page_size: 25 });
+    expect(toListParams(state)).toEqual({ page: 1, page_size: 10 });
   });
 
   it("trims search and includes sort/order together", () => {
@@ -21,7 +21,7 @@ describe("toListParams", () => {
     };
     expect(toListParams(state)).toEqual({
       page: 1,
-      page_size: 25,
+      page_size: 10,
       search: "acme",
       sort: "base_salary",
       order: "desc",

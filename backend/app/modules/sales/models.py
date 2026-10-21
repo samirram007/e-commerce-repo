@@ -47,7 +47,7 @@ class SalesOrder(Base, TimestampMixin, CreatedByMixin):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending_payment", index=True)
     payment_state: Mapped[str] = mapped_column(String(20), nullable=False, default="unpaid", index=True)  # unpaid|paid|refunded|partial
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     exchange_rate: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("1"))
     # address snapshot at checkout
     shipping_address: Mapped[str | None] = mapped_column(Text, nullable=True)

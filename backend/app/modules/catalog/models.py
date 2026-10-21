@@ -1,8 +1,9 @@
-"""Catalog models: categories, units of measure, products, price lists."""
+"""Catalog models: categories, units of measure, products, price lists,
+plus storefront interest (favorites/watchlist)."""
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.security import new_id
@@ -37,7 +38,7 @@ class UnitConversion(Base, TimestampMixin):
     company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     from_uom_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     to_uom_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    factor: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)  # qty_to = qty_from * factor
+    factor: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
 
     __table_args__ = (UniqueConstraint("company_id", "from_uom_id", "to_uom_id", name="uq_unit_conversion_pair"),)
 
@@ -65,6 +66,8 @@ class Product(Base, TimestampMixin, CreatedByMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_sellable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_purchasable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # storefront counters (monotonic; drives the "trending" rail)
+    view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
 
@@ -90,3 +93,37 @@ class PriceListItem(Base, TimestampMixin):
     price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class ProductInterest(Base, TimestampMixin):
+    """Shopper's saved products: favorites and watchlist.
+
+    One row per (kind, product, owner). The owner is the signed-in user when
+    available, otherwise the browser's anonymous id (X-Anon-Id header) so guest
+    browsing works without an account; favorites migrate server-side when the
+    anonymous id is claimed at checkout/login time.
+    """
+
+    __tablename__ = "product_interests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)  # favorite | watchlist
+    product_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    anon_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
+
+class DeliveryZone(Base, TimestampMixin, CreatedByMixin):
+    """Pincode → deliverability per company; seed emptily and admin-managed."""
+
+    __tablename__ = "delivery_zones"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    pincode: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    deliverable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    eta_days: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    cod_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (UniqueConstraint("company_id", "pincode", name="uq_delivery_zones_pin"),)

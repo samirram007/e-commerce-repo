@@ -148,7 +148,7 @@ def post_journal_entry(
     actor_user_id: str | None = None,
     currency: str | None = None,
     exchange_rate: Decimal | None = None,
-    base_currency: str = "USD",
+    base_currency: str = "INR",
     allow_closed_period: bool = False,
 ) -> JournalEntry:
     """Create and post a balanced journal entry (the only posting path).

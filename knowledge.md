@@ -2,7 +2,7 @@
 
 ## Project Overview
 **Freebuff** – a full-stack ERP platform for e-commerce, inventory, delivery and accounting.
-- **Backend**: FastAPI + SQLAlchemy 2.x + Alembic, Python 3.12, managed by `uv`.
+- **Backend**: FastAPI + SQLAlchemy 2.x + Alembic, Python 3.15, managed by `uv`.
 - **Frontend**: React 18 + strict TypeScript + Vite, TanStack Router/Query, Axios.
 
 ## Key Code Locations

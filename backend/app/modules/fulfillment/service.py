@@ -117,11 +117,14 @@ def transition_shipment(
 
 
 def _issue_reserved_stock(session: Session, shipment: Shipment, actor_user_id: str | None) -> None:
-    """Convert reservations into stock issues for this shipment's lines."""
-    from decimal import Decimal as D
+    """Convert reservations into stock issues for this shipment's lines.
 
+    Issues follow the exact rows `release_reservation` consumed (location and
+    batch_ref), so batch-tracked products decrement their batch row instead of
+    the batch_ref=None row, which would drive on-hand negative.
+    """
     for line in get_shipment_lines(session, shipment.id):
-        inventory.release_reservation(
+        plan = inventory.release_reservation(
             session,
             company_id=shipment.company_id,
             product_id=line.product_id,
@@ -131,19 +134,21 @@ def _issue_reserved_stock(session: Session, shipment: Shipment, actor_user_id: s
             actor_user_id=actor_user_id,
         )
         avg_cost = inventory.weighted_avg_cost(session, shipment.company_id, line.product_id)
-        inventory.post_movement(
-            session,
-            company_id=shipment.company_id,
-            movement_type="issue",
-            product_id=line.product_id,
-            location_id=line.from_location_id,
-            quantity=-dec(line.qty),
-            unit_cost=avg_cost,
-            source_type="shipment",
-            source_id=shipment.id,
-            source_line_id=line.id,
-            actor_user_id=actor_user_id,
-        )
+        for location_id, batch_ref, take in plan:
+            inventory.post_movement(
+                session,
+                company_id=shipment.company_id,
+                movement_type="issue",
+                product_id=line.product_id,
+                location_id=location_id,
+                quantity=-take,
+                batch_ref=batch_ref,
+                unit_cost=avg_cost,
+                source_type="shipment",
+                source_id=shipment.id,
+                source_line_id=line.id,
+                actor_user_id=actor_user_id,
+            )
 
 
 def _issue_cogs(session: Session, shipment: Shipment, actor_user_id: str | None) -> None:

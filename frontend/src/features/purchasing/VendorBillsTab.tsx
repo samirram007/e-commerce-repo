@@ -49,7 +49,7 @@ function emptyBillLine(): BillLineForm {
 const EMPTY_ADHOC: AdhocBillFormInput = {
   vendor_id: "",
   bill_date: today(),
-  currency: "USD",
+  currency: "INR",
   lines: [emptyBillLine()],
 };
 

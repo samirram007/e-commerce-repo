@@ -62,7 +62,7 @@ function emptyInvoiceForm(): InvoiceFormInput {
   return {
     customer_id: "",
     invoice_date: today(),
-    currency: "USD",
+    currency: "INR",
     shipping_total: "0",
     due_date: "",
     notes: "",

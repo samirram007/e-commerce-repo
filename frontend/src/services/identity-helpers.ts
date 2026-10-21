@@ -51,6 +51,9 @@ export const identityApi = {
     try {
       const { logout } = await import("./identity");
       await logout();
+    } catch {
+      // Best-effort: even if the server call fails, drop the local session
+      // so the redirect to /login still happens (no unhandled rejection).
     } finally {
       clearSession();
       clearSensitiveCaches();

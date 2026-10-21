@@ -1,6 +1,6 @@
 """Identity HTTP routes: bootstrap, auth, users, roles, audit listing."""
-from fastapi import APIRouter, Depends, Header, Request, Response, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,8 @@ from app.modules.identity.dependencies import (
     current_user,
     guard,
 )
-from app.modules.identity.models import RefreshSession, Role, User, UserCompany
+from app.modules.identity.models import RefreshSession, Role, User, UserCompany, UserPreference
+from app.shared.pagination import ListParams, Page
 from app.modules.identity.schemas import (
     CompanySummary,
     LoginIn,
@@ -48,6 +49,20 @@ def bootstrap(payload: RegisterAdminIn, session: Session = Depends(get_db)):
     return LoginOut(access_token=access, expires_in=get_settings().access_token_ttl_minutes * 60, user=UserOut.model_validate(user))
 
 
+def _refresh_cookie_params() -> dict:
+    """Shared httpOnly cookie attributes; secure in prod (or when forced)."""
+    settings = get_settings()
+    secure = settings.cookie_secure if settings.cookie_secure is not None else settings.is_prod
+    return dict(
+        key="refresh_token",
+        httponly=True,
+        samesite="lax",
+        secure=secure,
+        max_age=get_settings().refresh_token_ttl_days * 86400,
+        path="/api/v1/auth",
+    )
+
+
 @router.post("/auth/login", response_model=LoginOut)
 def login(payload: LoginIn, response: Response, session: Session = Depends(get_db)):
     user = svc.get_by_email(session, payload.email)
@@ -56,15 +71,7 @@ def login(payload: LoginIn, response: Response, session: Session = Depends(get_d
     if not user.is_active:
         raise AuthError("user_inactive", "Account is inactive")
     refresh, _ = svc.create_refresh_session(session, user)
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh,
-        httponly=True,
-        samesite="lax",
-        secure=get_settings().app_env == "prod",
-        max_age=get_settings().refresh_token_ttl_days * 86400,
-        path="/api/v1/auth",
-    )
+    response.set_cookie(value=refresh, **_refresh_cookie_params())
     log_action(
         session, action="auth.login", entity_type="user", entity_id=user.id, actor_user_id=user.id
     )
@@ -77,15 +84,7 @@ def refresh(request: Request, response: Response, session: Session = Depends(get
     if not token:
         raise AuthError("missing_refresh", "No refresh token cookie")
     user, access, new_refresh = svc.rotate_refresh_token(session, token)
-    response.set_cookie(
-        key="refresh_token",
-        value=new_refresh,
-        httponly=True,
-        samesite="lax",
-        secure=get_settings().app_env == "prod",
-        max_age=get_settings().refresh_token_ttl_days * 86400,
-        path="/api/v1/auth",
-    )
+    response.set_cookie(value=new_refresh, **_refresh_cookie_params())
     return LoginOut(access_token=access, expires_in=get_settings().access_token_ttl_minutes * 60, user=UserOut.model_validate(user))
 
 
@@ -93,10 +92,17 @@ def refresh(request: Request, response: Response, session: Session = Depends(get
 def logout(
     request: Request,
     response: Response,
-    user: UserCtx = Depends(current_user),
     session: Session = Depends(get_db),
 ):
-    """Revoke the presented refresh session (if still valid) and clear cookie."""
+    """Revoke the presented refresh session (if still valid) and clear cookie.
+
+    Deliberately not auth-guarded: whoever presents the refresh cookie may
+    revoke it, so sign-out also works with an expired access token. Returns
+    the injected ``response`` — FastAPI does *not* merge sub-response headers
+    into a directly-returned ``Response``, which silently dropped the
+    Set-Cookie deletion and left the browser with a working session cookie
+    (the user was bounced back into the app after signing out).
+    """
     from datetime import datetime, timezone
 
     token = request.cookies.get("refresh_token")
@@ -112,8 +118,9 @@ def logout(
             sess = session.execute(stmt).scalar_one_or_none()
             if sess is not None:
                 sess.revoked_at = datetime.now(timezone.utc)
+    response.status_code = 204
     response.delete_cookie(key="refresh_token", path="/api/v1/auth")
-    return Response(status_code=204)
+    return response
 
 
 @router.get("/auth/me", response_model=MeOut)
@@ -139,6 +146,56 @@ def me(
     )
 
 
+# ------------------------------------------------------- user preferences
+
+class PreferencesIn(BaseModel):
+    theme: str = Field(pattern="^(light|dark|system)$", default="system")
+    accent_color: str = Field(pattern="^#[0-9a-fA-F]{6}$", default="")
+    density: str = Field(pattern="^(compact|comfortable)$", default="comfortable")
+
+
+class PreferencesOut(BaseModel):
+    theme: str
+    accent_color: str
+    density: str
+
+
+def _prefs_out(prefs: UserPreference) -> PreferencesOut:
+    return PreferencesOut(
+        theme=prefs.theme, accent_color=prefs.accent_color or "", density=prefs.density
+    )
+
+
+@router.get("/auth/preferences", response_model=PreferencesOut)
+def get_preferences(
+    user: UserCtx = Depends(current_user), session: Session = Depends(get_db)
+):
+    """Personal look-and-feel preferences (theme, accent color, density)."""
+    prefs = session.get(UserPreference, user.id)
+    if prefs is None:
+        prefs = UserPreference(user_id=user.id)
+        session.add(prefs)
+        session.flush()
+    return _prefs_out(prefs)
+
+
+@router.put("/auth/preferences", response_model=PreferencesOut)
+def update_preferences(
+    payload: PreferencesIn,
+    user: UserCtx = Depends(current_user),
+    session: Session = Depends(get_db),
+):
+    prefs = session.get(UserPreference, user.id)
+    if prefs is None:
+        prefs = UserPreference(user_id=user.id)
+        session.add(prefs)
+    prefs.theme = payload.theme
+    prefs.accent_color = payload.accent_color
+    prefs.density = payload.density
+    session.flush()
+    return _prefs_out(prefs)
+
+
 @router.get("/auth/permissions", response_model=dict)
 def permissions_catalog():
     return {"permissions": ALL_PERMISSIONS, "roles": sorted(svc_role_names())}
@@ -150,13 +207,24 @@ def svc_role_names():
 
 
 # ---- users (platform admin) ----
-@router.get("/users", response_model=list[UserOut])
+@router.get("/users", response_model=Page[UserOut])
 def list_users(
-    _: CompanyCtx = Depends(guard("platform.users.manage")), session: Session = Depends(get_db)
+    params: ListParams = Depends(),
+    is_active: bool | None = Query(None),
+    is_platform_admin: bool | None = Query(None),
+    role: str | None = Query(None, max_length=64),
+    _: CompanyCtx = Depends(guard("platform.users.manage")),
+    session: Session = Depends(get_db),
 ):
     import json as _json
 
-    users = session.execute(select(User).order_by(User.email)).scalars().all()
+    users, total = svc.list_users_page(
+        session,
+        params,
+        is_active=is_active,
+        is_platform_admin=is_platform_admin,
+        role=role.strip() if role else None,
+    )
     role_map: dict[str, set[str]] = {}
     if users:
         rows = session.execute(
@@ -164,12 +232,12 @@ def list_users(
         ).scalars().all()
         for row in rows:
             role_map.setdefault(row.user_id, set()).update(_json.loads(row.role_names))
-    out: list[UserOut] = []
+    items: list[UserOut] = []
     for user in users:
         item = UserOut.model_validate(user)
         item.roles = sorted(role_map.get(user.id, set()))
-        out.append(item)
-    return out
+        items.append(item)
+    return Page[UserOut](items=items, total=total, page=params.page, page_size=params.page_size)
 
 
 @router.post("/users", response_model=UserOut, status_code=201)

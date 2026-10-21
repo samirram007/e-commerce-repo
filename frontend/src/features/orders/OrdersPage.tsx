@@ -72,6 +72,7 @@ export function OrdersPage() {
   const canOrder = has("storefront.cart.use");
 
   const [status, setStatus] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
   const [cartOpen, setCartOpen] = useState(false);
@@ -84,7 +85,9 @@ export function OrdersPage() {
   const [payForm, setPayForm] = useState<PayFormInput>(EMPTY_PAY);
   const [payErrors, setPayErrors] = useState<Record<string, string>>({});
 
-  const orders = useQuery(ordersQueryOptions({ status: status ?? undefined }));
+  const orders = useQuery(
+    ordersQueryOptions({ status: status ?? undefined, customerId: customerId ?? undefined }),
+  );
   const detail = useQuery(orderQueryOptions(selectedOrderId ?? "", selectedOrderId !== null));
   const cart = useQuery(cartQueryOptions(cartOpen));
   const shippingTotal = checkoutForm.shipping_total ?? "0";
@@ -122,6 +125,12 @@ export function OrdersPage() {
   const customerOptions = useMemo(
     () => (customers.data ?? []).map((c) => ({ value: c.id, label: `${c.code} — ${c.name}` })),
     [customers.data],
+  );
+
+  // Filter variant includes a reset entry; checkout's customerOptions does not.
+  const customerFilterOptions = useMemo(
+    () => [{ value: "", label: "All customers" }, ...customerOptions],
+    [customerOptions],
   );
 
   const activeQuote = quote.data ?? cart.data?.quote;
@@ -217,6 +226,15 @@ export function OrdersPage() {
               options={STATUS_OPTIONS}
               onChange={(value) => setStatus(value || null)}
               placeholder="All statuses"
+            />
+          </Field>
+          <Field label="Customer">
+            <SheetSelect
+              value={customerId ?? ""}
+              options={customerFilterOptions}
+              onChange={(value) => setCustomerId(value || null)}
+              placeholder="All customers"
+              loading={customers.isLoading}
             />
           </Field>
         </div>

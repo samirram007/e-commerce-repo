@@ -74,6 +74,8 @@ export function ProductsPage() {
 
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [stockType, setStockType] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [form, setForm] = useState<ProductFormInput>(EMPTY_FORM);
@@ -82,7 +84,12 @@ export function ProductsPage() {
   const [stockFor, setStockFor] = useState<Product | null>(null);
 
   const products = useQuery(
-    productsQueryOptions({ search, categoryId: categoryId ?? undefined }),
+    productsQueryOptions({
+      search,
+      categoryId: categoryId ?? undefined,
+      stockType: stockType ?? undefined,
+      isActive: activeFilter ?? undefined,
+    }),
   );
   const categories = useQuery(categoriesQueryOptions());
   const uoms = useQuery(uomsQueryOptions());
@@ -106,8 +113,26 @@ export function ProductsPage() {
   }, [locations.data]);
 
   const categoryOptions = useMemo(
-    () => (categories.data ?? []).map((c) => ({ value: c.id, label: c.name })),
+    () => [
+      { value: "", label: "All categories" },
+      ...(categories.data ?? []).map((c) => ({ value: c.id, label: c.name })),
+    ],
     [categories.data],
+  );
+  const stockTypeOptions = useMemo(
+    () => [
+      { value: "", label: "All types" },
+      ...STOCK_TYPES.map((type) => ({ value: type, label: titleCase(type) })),
+    ],
+    [],
+  );
+  const activeOptions = useMemo(
+    () => [
+      { value: "", label: "All products" },
+      { value: "true", label: "Active" },
+      { value: "false", label: "Inactive" },
+    ],
+    [],
   );
   const uomOptions = useMemo(
     () => (uoms.data ?? []).map((u) => ({ value: u.id, label: `${u.code} — ${u.name}` })),
@@ -231,17 +256,33 @@ export function ProductsPage() {
           <Field label="Search">
             <Input
               value={search}
-              placeholder="SKU or name"
+              placeholder="SKU, name or barcode"
               onChange={(event) => setSearch(event.target.value)}
             />
           </Field>
           <Field label="Category">
             <SheetSelect
-              value={categoryId}
+              value={categoryId ?? ""}
               options={categoryOptions}
-              onChange={setCategoryId}
+              onChange={(value) => setCategoryId(value || null)}
               placeholder="All categories"
               loading={categories.isLoading}
+            />
+          </Field>
+          <Field label="Stock type">
+            <SheetSelect
+              value={stockType ?? ""}
+              options={stockTypeOptions}
+              onChange={(value) => setStockType(value || null)}
+              placeholder="All types"
+            />
+          </Field>
+          <Field label="Status">
+            <SheetSelect
+              value={activeFilter ?? ""}
+              options={activeOptions}
+              onChange={(value) => setActiveFilter(value || null)}
+              placeholder="All products"
             />
           </Field>
         </div>
@@ -307,7 +348,7 @@ export function ProductsPage() {
             <SheetSelect
               value={form.category_id}
               options={categoryOptions}
-              onChange={(value) => setField("category_id", value)}
+              onChange={(value) => setField("category_id", value || null)}
               loading={categories.isLoading}
             />
           </Field>

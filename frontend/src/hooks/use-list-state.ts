@@ -10,7 +10,8 @@ export interface ListState {
   filters: Record<string, string>;
 }
 
-export const DEFAULT_PAGE_SIZE = 25;
+/** Default rows per page for every list screen (matches the DataTable page-size options). */
+export const DEFAULT_PAGE_SIZE = 10;
 
 export function initialListState(options?: {
   pageSize?: number;

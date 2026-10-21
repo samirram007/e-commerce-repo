@@ -27,6 +27,7 @@ from app.modules.sales.models import (
     SalesOrder,
 )
 from app.modules.taxes import service as taxes
+from app.modules.taxes.models import TaxRate
 from app.shared.idempotency import run_idempotent
 from app.shared.money import dec, money
 from app.shared.numbering import allocate_number
@@ -129,7 +130,7 @@ def quote_cart(session: Session, cart: Cart, *, shipping_total=Decimal("0")) -> 
     company = _company(session, cart.company_id)
     default_tax_rate_id = taxes.default_sales_tax_id(session, company.id)
     default_tax = (
-        dec(session.get(taxes.TaxRate, default_tax_rate_id).percentage) if default_tax_rate_id else Decimal("0")
+        dec(session.get(TaxRate, default_tax_rate_id).percentage) if default_tax_rate_id else Decimal("0")
     )
     today = datetime.now(timezone.utc).date()
     lines = []
@@ -287,7 +288,7 @@ def _checkout_once(
 def default_sales_tax_percentage(session: Session, company_id: str) -> Decimal:
     tax_rate_id = taxes.default_sales_tax_id(session, company_id)
     if tax_rate_id:
-        return dec(session.get(taxes.TaxRate, tax_rate_id).percentage)
+        return dec(session.get(TaxRate, tax_rate_id).percentage)
     return Decimal("0")
 
 

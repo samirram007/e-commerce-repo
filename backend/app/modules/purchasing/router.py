@@ -31,7 +31,7 @@ class POCreateIn(BaseModel):
     vendor_id: str
     order_date: date
     expected_date: date | None = None
-    currency: str = Field(default="USD", min_length=3, max_length=3)
+    currency: str = Field(default="INR", min_length=3, max_length=3)
     notes: str | None = None
     lines: list[POLineIn] = Field(min_length=1)
 
@@ -232,7 +232,7 @@ class AdhocBillLineIn(BaseModel):
 class AdhocBillIn(BaseModel):
     vendor_id: str
     bill_date: date
-    currency: str = "USD"
+    currency: str = "INR"
     lines: list[AdhocBillLineIn] = Field(min_length=1)
 
 

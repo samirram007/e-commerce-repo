@@ -54,6 +54,24 @@ class RefreshSession(Base, TimestampMixin):
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
+class UserPreference(Base, TimestampMixin):
+    """Signed-in user's personal display preferences (theme, accent color).
+
+    One row per user; company-agnostic because these are device-agnostic
+    look-and-feel choices, not tenant-scoped business settings.
+    """
+
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    # light | dark | system
+    theme: Mapped[str] = mapped_column(String(16), nullable=False, default="system")
+    # hex accent color, e.g. #2f54eb
+    accent_color: Mapped[str] = mapped_column(String(7), nullable=False, default="")
+    # compact | comfortable — table/control density
+    density: Mapped[str] = mapped_column(String(16), nullable=False, default="comfortable")
+
+
 class AuditLog(Base, TimestampMixin):
     """Append-only audit trail for significant actions (identity keeps it so
     the audit module has no import cycle; writes go through audit.log_action)."""

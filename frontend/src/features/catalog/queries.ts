@@ -13,6 +13,9 @@ import type { ProductPayload } from "./schemas";
 export interface ProductFilters {
   search?: string;
   categoryId?: string;
+  stockType?: string;
+  /** "true" | "false" — matches the backend `is_active` query param. */
+  isActive?: string;
 }
 
 export const catalogKeys = {

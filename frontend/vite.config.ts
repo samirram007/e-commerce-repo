@@ -30,7 +30,9 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       proxy: {
         "/api": {
-          target: env.VITE_API_PROXY ?? "http://localhost:8000",
+          // Pin IPv4: uvicorn binds 127.0.0.1 only, but `localhost` resolves
+          // to ::1 first on some machines, which makes the proxy 502.
+          target: env.VITE_API_PROXY ?? "http://127.0.0.1:8000",
           changeOrigin: true,
         },
       },

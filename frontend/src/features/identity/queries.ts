@@ -16,10 +16,10 @@ export const identityKeys = {
   permissions: () => [...identityKeys.all, "permissions"] as const,
 };
 
-export function usersQueryOptions() {
+export function usersQueryOptions(params: Record<string, string | number> = {}) {
   return queryOptions({
-    queryKey: identityKeys.users(),
-    queryFn: fetchUsers,
+    queryKey: [...identityKeys.users(), params],
+    queryFn: () => fetchUsers(params),
   });
 }
 

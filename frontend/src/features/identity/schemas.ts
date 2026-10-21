@@ -25,7 +25,14 @@ export const userSchema = z.object({
 });
 export type User = z.infer<typeof userSchema>;
 
-export const userListSchema = z.array(userSchema);
+/** Server-side list envelope from GET /users (ListParams contract). */
+export const userPageSchema = z.object({
+  items: z.array(userSchema),
+  total: z.number(),
+  page: z.number(),
+  page_size: z.number(),
+});
+export type UserPage = z.infer<typeof userPageSchema>;
 
 export const userCreateFormSchema = z.object({
   email: z.email("Enter a valid email address"),

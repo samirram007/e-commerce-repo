@@ -328,7 +328,7 @@ def create_bill_from_receipt(
 
 def create_bill_adhoc(
     session: Session, *, company_id: str, vendor_id: str, actor_user_id: str,
-    bill_date: date, lines: list[dict], currency: str = "USD",
+    bill_date: date, lines: list[dict], currency: str = "INR",
 ) -> VendorBill:
     """Direct vendor bill (expense purchase without goods receipt).
     lines: product_id (optional for services), description, qty, unit_cost, tax_rate_id"""

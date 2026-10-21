@@ -1,8 +1,10 @@
-import type {
-  ButtonHTMLAttributes,
-  InputHTMLAttributes,
-  ReactNode,
-  TextareaHTMLAttributes,
+import {
+  useEffect,
+  useState,
+  type ButtonHTMLAttributes,
+  type InputHTMLAttributes,
+  type ReactNode,
+  type TextareaHTMLAttributes,
 } from "react";
 import { errorMessage } from "../lib/api-client";
 import { type Tone, statusTone } from "../lib/format";
@@ -238,6 +240,7 @@ export function DataTable<T>({
   error,
   onRetry,
   empty,
+  pageSize = 10,
 }: {
   columns: Column<T>[];
   rows: T[] | undefined;
@@ -246,36 +249,136 @@ export function DataTable<T>({
   error?: unknown;
   onRetry?: () => void;
   empty?: ReactNode;
+  /** Client-side page size. Set 0 to render every row without pagination. */
+  pageSize?: number;
 }) {
+  const [page, setPage] = useState(1);
+  const [size, setSize] = useState(pageSize > 0 ? pageSize : 10);
+
+  // A shrinking result set (new search/filter) snaps back to the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [rows?.length]);
+
   if (loading) return <Spinner />;
   if (error) return <ErrorState error={error} onRetry={onRetry} />;
   if (!rows || rows.length === 0) return <>{empty ?? <EmptyState />}</>;
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / size));
+  const current = Math.min(page, pageCount);
+  const paginated = pageSize > 0 && rows.length > size;
+  // Keep the footer once the user picks a non-default size, so the Rows
+  // control never disappears while rows still fit on a single page.
+  const showFooter = pageSize > 0 && (paginated || size !== pageSize);
+  const start = paginated ? (current - 1) * size : 0;
+  const visible = paginated ? rows.slice(start, start + size) : rows;
+
   return (
-    <table className="data">
-      <thead>
-        <tr>
-          {columns.map((column) => (
-            <th key={column.key} style={column.align ? { textAlign: column.align } : undefined}>
-              {column.header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, index) => (
-          <tr key={rowKey(row, index)}>
+    <>
+      <table className="data">
+        <thead>
+          <tr>
             {columns.map((column) => (
-              <td
-                key={column.key}
-                className={column.className}
-                style={column.align ? { textAlign: column.align } : undefined}
-              >
-                {column.render ? column.render(row, index) : null}
-              </td>
+              <th key={column.key} style={column.align ? { textAlign: column.align } : undefined}>
+                {column.header}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {visible.map((row, index) => (
+            <tr key={rowKey(row, start + index)}>
+              {columns.map((column) => (
+                <td
+                  key={column.key}
+                  className={column.className}
+                  style={column.align ? { textAlign: column.align } : undefined}
+                >
+                  {column.render ? column.render(row, start + index) : null}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {showFooter ? (
+        <TablePagination
+          from={start + 1}
+          to={Math.min(start + size, rows.length)}
+          total={rows.length}
+          page={current}
+          pageCount={pageCount}
+          pageSize={size}
+          onPageChange={setPage}
+          onPageSizeChange={(next) => {
+            setSize(next);
+            setPage(1);
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+export const TABLE_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+/** Shared pagination footer: row count, rows-per-page and prev/next controls. */
+export function TablePagination({
+  from,
+  to,
+  total,
+  page,
+  pageCount,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
+  pageSizeOptions = TABLE_PAGE_SIZE_OPTIONS,
+}: {
+  from: number;
+  to: number;
+  /** Omit for unpaginated sources; the label then falls back to `to` rows. */
+  total?: number;
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+  pageSizeOptions?: number[];
+}) {
+  return (
+    <div className="table-foot">
+      <span className="muted">
+        {total === undefined ? `${to} rows` : `${from}–${to} of ${total} rows`}
+      </span>
+      <div className="toolbar">
+        <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          Rows
+          <select
+            value={pageSize}
+            onChange={(event) => onPageSizeChange(Number(event.target.value))}
+            aria-label="Rows per page"
+          >
+            {pageSizeOptions.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button variant="secondary" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          ← Prev
+        </Button>
+        <span className="muted">
+          Page {page} of {pageCount}
+        </span>
+        <Button
+          variant="secondary"
+          disabled={page >= pageCount}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next →
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -3,7 +3,123 @@
 :root {
   font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light dark;
+  /* Accent color; overridden by the theme system (document inline style). */
+  --accent: #2f54eb;
+  --accent-text: #2f54eb;
+  --accent-soft: #eef2ff;
 }
+
+/* ---- theme: resolved dark mode (data-resolved-theme on <html>) ---- */
+:root[data-resolved-theme="dark"] {
+  color-scheme: dark;
+  --accent-text: #8ea2ff;
+  --accent-soft: #1d2b4d;
+}
+
+:root[data-resolved-theme="dark"] body {
+  background: #0d1326;
+  color: #dbe2f1;
+}
+
+:root[data-resolved-theme="dark"] .card,
+:root[data-resolved-theme="dark"] .kpi,
+:root[data-resolved-theme="dark"] .menu,
+:root[data-resolved-theme="dark"] .modal,
+:root[data-resolved-theme="dark"] .sheet,
+:root[data-resolved-theme="dark"] .profile-trigger {
+  background: #131a30;
+  border-color: #273454;
+  color: #dbe2f1;
+}
+
+:root[data-resolved-theme="dark"] table.data th {
+  color: #9aa8c7;
+  background: #10182c;
+}
+
+:root[data-resolved-theme="dark"] table.data th,
+:root[data-resolved-theme="dark"] table.data td {
+  border-bottom-color: #222d4c;
+}
+
+:root[data-resolved-theme="dark"] input,
+:root[data-resolved-theme="dark"] select,
+:root[data-resolved-theme="dark"] textarea,
+:root[data-resolved-theme="dark"] .sheet-trigger {
+  background: #0f1730;
+  border-color: #2a3760;
+  color: #dbe2f1;
+}
+
+:root[data-resolved-theme="dark"] .badge {
+  background: #1d2b4d;
+  color: #aebaff;
+}
+
+:root[data-resolved-theme="dark"] .badge.ok { background: #12351f; color: #6fdfa1; }
+:root[data-resolved-theme="dark"] .badge.warn { background: #3d2a05; color: #ffc46b; }
+:root[data-resolved-theme="dark"] .badge.bad { background: #40161b; color: #ff9a9a; }
+
+:root[data-resolved-theme="dark"] button.secondary { background: #223059; color: #dbe2f1; }
+
+/* Profile dropdown — explicit overrides for its hardcoded light text colors */
+:root[data-resolved-theme="dark"] .profile-trigger,
+:root[data-resolved-theme="dark"] .menu-item,
+:root[data-resolved-theme="dark"] .menu-name {
+  color: #dbe2f1;
+}
+:root[data-resolved-theme="dark"] .menu-danger { color: #ff9a9a; }
+:root[data-resolved-theme="dark"] .menu-item.menu-danger:hover { background: #40161b; }
+
+:root[data-resolved-theme="dark"] .error-text { color: #ff8b8b; }
+:root[data-resolved-theme="dark"] .muted { color: #92a0bd; }
+:root[data-resolved-theme="dark"] .error-banner { background: #40161b; color: #ff9a9a; }
+:root[data-resolved-theme="dark"] .menu-item:hover { background: #1d2b4d; }
+:root[data-resolved-theme="dark"] .sheet-option:hover { background: #1d2b4d; }
+:root[data-resolved-theme="dark"] .sheet-option.selected { background: #233260; color: #aebaff; }
+:root[data-resolved-theme="dark"] .tab { color: #9aa8c7; }
+:root[data-resolved-theme="dark"] .tab.active { background: #233260; color: #aebaff; }
+:root[data-resolved-theme="dark"] .subtle,
+:root[data-resolved-theme="dark"] .field label,
+:root[data-resolved-theme="dark"] .kpi .label { color: #92a0bd; }
+
+/* SheetSelect options: base rule hardcodes light-mode text (#1c2333), which
+   is invisible on the dark sheet — every unselected option needs this. */
+:root[data-resolved-theme="dark"] .sheet-option { color: #dbe2f1; }
+
+/* Profile trigger hover/open must not keep the light #f2f5fb background
+   (light bg + dark-mode text = unreadable). */
+:root[data-resolved-theme="dark"] .profile-trigger:hover,
+:root[data-resolved-theme="dark"] .profile-trigger.open { background: #223059; }
+
+/* Empty states were left at the light-mode #5a6478 (~2.9:1 on dark). */
+:root[data-resolved-theme="dark"] .empty { color: #92a0bd; }
+
+/* Hairline borders/dividers that otherwise stay near-white in dark mode. */
+:root[data-resolved-theme="dark"] .modal-head,
+:root[data-resolved-theme="dark"] .modal-foot,
+:root[data-resolved-theme="dark"] .sheet-head,
+:root[data-resolved-theme="dark"] .sheet-foot,
+:root[data-resolved-theme="dark"] .sheet-search { border-color: #222d4c; }
+:root[data-resolved-theme="dark"] .menu-divider { background: #222d4c; }
+:root[data-resolved-theme="dark"] .tabs { border-bottom-color: #273454; }
+
+/* ---- theme: density (data-density on <html>) ---- */
+:root[data-density="compact"] table.data th,
+:root[data-density="compact"] table.data td { padding: 4px 8px; }
+:root[data-density="compact"] .field { margin-bottom: 8px; }
+:root[data-resolved-theme="dark"] button.th-sort .sort-ind { color: #64749b; }
+
+/* ---- theme: accent (uses --accent var; supports any hex) ---- */
+button,
+.btn { background: var(--accent); }
+button.ghost { color: var(--accent-text); }
+.tab.active { background: var(--accent-soft); color: var(--accent-text); }
+.sheet-option.selected { background: var(--accent-soft); color: var(--accent-text); }
+.avatar { background: var(--accent); }
+button.th-sort.active .sort-ind { color: var(--accent-text); }
+:root[data-resolved-theme="dark"] .menu-item:hover,
+:root[data-resolved-theme="dark"] .sheet-option:hover { background: var(--accent-soft, #1d2b4d); }
 
 * {
   box-sizing: border-box;
@@ -47,6 +163,19 @@ a { color: inherit; }
 }
 
 .sidebar a.active, .sidebar a:hover { background: #1d2b4d; color: #fff; }
+
+/* ---- sidebar sections ---- */
+.nav-ungrouped { display: block; margin-bottom: 6px; }
+.nav-group { margin-bottom: 10px; }
+.nav-group-label {
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #7b87a3;
+  padding: 8px 10px 4px;
+  user-select: none;
+}
 
 .content {
   flex: 1;
@@ -97,7 +226,7 @@ button.th-sort {
   gap: 4px;
 }
 button.th-sort .sort-ind { font-size: 10px; color: #9aa4b8; }
-button.th-sort.active .sort-ind { color: #2f54eb; }
+button.th-sort.active .sort-ind { color: var(--accent-text); }
 .table-foot {
   display: flex;
   align-items: center;
@@ -121,7 +250,7 @@ button.th-sort.active .sort-ind { color: #2f54eb; }
 .badge.bad { background: #fde5e5; color: #b02a2a; }
 
 button, .btn {
-  background: #2f54eb;
+  background: var(--accent);
   border: none;
   color: #fff;
   padding: 8px 14px;
@@ -170,7 +299,7 @@ input, select, textarea {
 
 /* ---- buttons: extra variants ---- */
 button.danger { background: #d93025; color: #fff; }
-button.ghost { background: transparent; color: #2f54eb; padding: 4px 6px; }
+button.ghost { background: transparent; color: var(--accent-text); padding: 4px 6px; }
 
 /* ---- states ---- */
 .empty { text-align: center; padding: 28px 12px; color: #5a6478; }
@@ -180,7 +309,7 @@ button.ghost { background: transparent; color: #2f54eb; padding: 4px 6px; }
 /* ---- tabs ---- */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid #e3e7ef; margin-bottom: 14px; flex-wrap: wrap; }
 .tab { background: transparent; color: #5a6478; border-radius: 8px 8px 0 0; padding: 8px 12px; }
-.tab.active { background: #eef2ff; color: #2f54eb; font-weight: 600; }
+.tab.active { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 
 /* ---- modal ---- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(16, 25, 46, 0.45); display: flex; z-index: 50; align-items: center; justify-content: center; padding: 20px; }
@@ -200,7 +329,7 @@ button.ghost { background: transparent; color: #2f54eb; padding: 4px 6px; }
 .sheet-list { overflow: auto; flex: 1; padding: 6px; }
 .sheet-option { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; background: transparent; color: #1c2333; padding: 10px 12px; border-radius: 8px; }
 .sheet-option:hover { background: #f2f5fb; }
-.sheet-option.selected { background: #eef2ff; color: #2f54eb; font-weight: 600; }
+.sheet-option.selected { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
 .sheet-select { display: flex; flex-direction: column; }
 .sheet-trigger { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; background: #fff; color: #1c2333; border: 1px solid #d4d9e6; font-weight: 400; text-align: left; }
 .sheet-trigger .placeholder { color: #8b93a7; }
@@ -232,7 +361,7 @@ button.ghost { background: transparent; color: #2f54eb; padding: 4px 6px; }
   width: 30px;
   height: 30px;
   border-radius: 999px;
-  background: #2f54eb;
+  background: var(--accent);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
@@ -276,3 +405,57 @@ button.ghost { background: transparent; color: #2f54eb; padding: 4px 6px; }
 .menu-item:hover { background: #f2f5fb; }
 .menu-danger { color: #b02a2a; }
 .menu-danger:hover { background: #fde5e5; }
+
+/* ---- appearance: theme cards + accent swatches (Settings → Appearance) ---- */
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  background: #f2f5fb;
+  border: 1px solid #e3e7ef;
+  color: #1c2333;
+  border-radius: 12px;
+  padding: 12px;
+  text-align: left;
+  font-weight: 400;
+}
+.theme-card:hover { background: #e9eefa; }
+.theme-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.theme-card-preview {
+  display: flex;
+  gap: 6px;
+  height: 54px;
+  border-radius: 8px;
+  border: 1px solid #d4d9e6;
+  padding: 8px;
+}
+.theme-card-preview[data-preview="light"] { background: #ffffff; }
+.theme-card-preview[data-preview="dark"] { background: #0d1326; }
+.theme-card-preview[data-preview="system"] {
+  background: linear-gradient(90deg, #ffffff 50%, #0d1326 50%);
+}
+.theme-dot { width: 16px; height: 16px; border-radius: 999px; background: var(--accent); }
+.theme-dot.muted-dot { background: #9aa4b8; }
+.accent-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.accent-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  padding: 0;
+}
+.accent-swatch:hover { transform: scale(1.08); }
+.accent-swatch.selected { border-color: #1c2333; box-shadow: 0 0 0 3px #ffffff inset; }
+
+:root[data-resolved-theme="dark"] .theme-card {
+  background: #182038;
+  border-color: #273454;
+  color: #dbe2f1;
+}
+:root[data-resolved-theme="dark"] .theme-card:hover,
+:root[data-resolved-theme="dark"] .theme-card.selected {
+  background: #223059;
+}
+:root[data-resolved-theme="dark"] .theme-card-preview { border-color: #2a3760; }
+:root[data-resolved-theme="dark"] .accent-swatch.selected { border-color: #dbe2f1; box-shadow: 0 0 0 3px #0d1326 inset; }

@@ -14,7 +14,7 @@ export const PO_STATUSES = [
 ] as const;
 export type PoStatus = (typeof PO_STATUSES)[number];
 
-export const CURRENCIES = ["USD", "EUR", "GBP", "ZAR", "INR", "AUD", "CAD", "JPY"] as const;
+export const CURRENCIES = ["INR", "USD", "EUR", "GBP", "ZAR", "AUD", "CAD", "JPY"] as const;
 
 // ---- response schemas (backend shapes) ----
 export const purchaseOrderSchema = z.object({

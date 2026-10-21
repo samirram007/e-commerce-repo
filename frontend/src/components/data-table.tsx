@@ -2,11 +2,12 @@ import type { ReactNode } from "react";
 import type { ListStateApi } from "../hooks/use-list-state";
 import { cn } from "../lib/utils";
 import {
-  Button,
   EmptyState,
   ErrorState,
   Field,
   Input,
+  TablePagination,
+  TABLE_PAGE_SIZE_OPTIONS,
   type Column,
   Spinner,
 } from "./ui";
@@ -57,10 +58,10 @@ export function ServerDataTable<T>({
   filters,
   actions,
   hideSearch,
-  pageSizeOptions = [10, 25, 50, 100],
+  pageSizeOptions = TABLE_PAGE_SIZE_OPTIONS,
 }: ServerDataTableProps<T>) {
   const { state, setPage, setPageSize } = list;
-  const pageCount = total === undefined ? undefined : Math.max(1, Math.ceil(total / state.pageSize));
+  const pageCount = Math.max(1, Math.ceil((total ?? rows?.length ?? 0) / state.pageSize));
   const from = total === 0 || !rows?.length ? 0 : (state.page - 1) * state.pageSize + 1;
   const to = total === undefined ? (rows?.length ?? 0) : Math.min(state.page * state.pageSize, total);
 
@@ -140,47 +141,17 @@ export function ServerDataTable<T>({
         </table>
       ) : null}
 
-      <div className="table-foot">
-        <span className="muted">
-          {total === undefined
-            ? `${rows?.length ?? 0} rows`
-            : `${from}–${to} of ${total} rows`}
-        </span>
-        <div className="toolbar">
-          <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            Rows
-            <select
-              value={state.pageSize}
-              onChange={(event) => setPageSize(Number(event.target.value))}
-              aria-label="Rows per page"
-            >
-              {pageSizeOptions.map((size) => (
-                <option key={size} value={size}>
-                  {size}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button
-            variant="secondary"
-            disabled={state.page <= 1}
-            onClick={() => setPage(state.page - 1)}
-          >
-            ← Prev
-          </Button>
-          <span className="muted">
-            Page {state.page}
-            {pageCount !== undefined ? ` of ${pageCount}` : ""}
-          </span>
-          <Button
-            variant="secondary"
-            disabled={pageCount !== undefined ? state.page >= pageCount : (rows?.length ?? 0) < state.pageSize}
-            onClick={() => setPage(state.page + 1)}
-          >
-            Next →
-          </Button>
-        </div>
-      </div>
+      <TablePagination
+        from={from}
+        to={to}
+        total={total}
+        page={state.page}
+        pageCount={pageCount}
+        pageSize={state.pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+        pageSizeOptions={pageSizeOptions}
+      />
     </>
   );
 }

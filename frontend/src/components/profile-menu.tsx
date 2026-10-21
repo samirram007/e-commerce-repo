@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Badge } from "./ui";
 import { useAuth } from "../auth/auth-context";
+import { useTheme } from "../theme/theme-context";
 import { titleCase } from "../lib/format";
 import { cn } from "../lib/utils";
 
@@ -43,6 +44,7 @@ function initials(name: string | null | undefined, email: string | null | undefi
 
 export function ProfileMenu(): React.JSX.Element {
   const { user, roles, isPlatformAdmin, isCompanyAdmin, hasPermission, logout } = useAuth();
+  const { theme, cycleTheme } = useTheme();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -143,6 +145,16 @@ export function ProfileMenu(): React.JSX.Element {
               ))}
             </>
           ) : null}
+
+          <div className="menu-divider" />
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            onClick={cycleTheme}
+          >
+            Theme: {theme === "system" ? "Follow system" : titleCase(theme)}
+          </button>
 
           <div className="menu-divider" />
           <button

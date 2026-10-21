@@ -1,12 +1,46 @@
-"""Centralized application settings (loaded from backend/.env or environment)."""
-from functools import lru_cache
-from typing import Any
+"""Centralized application settings (loaded from backend/.env files or environment).
 
+Environment file contract (priority: process env > dotenv files in order,
+*last* file in a tuple wins):
+
+1. Real environment variables   — always win (CI, containers, secrets manager)
+2. ``.env``                     — local/generic overrides, gitignored
+3. ``.env.{APP_ENV}``           — environment defaults, committed
+4. Class defaults
+
+Selection by ``APP_ENV``:
+
+- ``dev``    → ``.env.development`` defaults; your local ``.env`` overrides them.
+- ``test``   → ``.env.testing`` FORCE-wins over any local ``.env`` so a stray
+               local file can never point tests at a dev/prod database.
+              (``tests/conftest.py`` additionally sets os.environ before imports.)
+- ``prod``   → ``.env.production`` force-wins over any local ``.env``; secrets
+              come from real process env in a proper deployment.
+- ``prod`` refuses placeholder SECRET_KEY values (fail fast, see guard below).
+"""
+import os
+from functools import lru_cache
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_app_env = os.environ.get("APP_ENV", "dev")
+
+_env_file: tuple[str, ...]
+if _app_env == "test":
+    _env_file = (".env", ".env.testing")
+elif _app_env == "prod":
+    _env_file = (".env", ".env.production")
+else:
+    _env_file = (".env.development", ".env")
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=_env_file,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_env: str = "dev"  # dev | test | prod
     log_level: str = "INFO"
@@ -30,11 +64,28 @@ class Settings(BaseSettings):
     seed_admin_email: str = "admin@example.com"
     seed_admin_password: str = "ChangeMe!123"
 
-    currency_precision: int = 2  # default display/rounding exponent
+    cookie_secure: bool | None = None  # None → secure when APP_ENV=prod
 
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
+
+    @model_validator(mode="after")
+    def production_secret_guard(self) -> "Settings":
+        """Refuse to run in prod with a default/published secret key."""
+        if self.is_prod:
+            weak = {
+                "",
+                "change-me-to-a-long-random-string",
+                "dev-secret-change-me",
+                "test-secret",
+            }
+            if self.secret_key.strip().lower() in weak:
+                raise ValueError(
+                    "APP_ENV=prod requires a strong SECRET_KEY "
+                    "(set via environment or .env.production)"
+                )
+        return self
 
 
 @lru_cache

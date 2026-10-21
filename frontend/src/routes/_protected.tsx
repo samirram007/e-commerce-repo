@@ -47,39 +47,90 @@ interface NavItem {
   permission?: string;
 }
 
-const NAV_LINKS: NavItem[] = [
-  { to: "/", label: "Dashboard" },
-  { to: "/products", label: "Catalog", permission: "catalog.view" },
-  { to: "/partners", label: "Customers & Vendors" },
-  { to: "/orders", label: "Sales Orders", permission: "sales.view" },
-  { to: "/shipments", label: "Shipments" },
-  { to: "/returns", label: "Returns" },
-  { to: "/purchase-orders", label: "Purchasing", permission: "purchasing.view" },
-  { to: "/inventory", label: "Inventory", permission: "inventory.view" },
-  { to: "/invoices", label: "Invoices", permission: "invoicing.view" },
-  { to: "/payments", label: "Payments", permission: "payments.view" },
-  { to: "/accounting", label: "Accounting", permission: "accounting.journal.view" },
-  { to: "/reports", label: "Reports", permission: "reports.view" },
-  { to: "/audit", label: "Audit Log", permission: "audit.log.read" },
-  { to: "/payroll", label: "Payroll", permission: "payroll.view" },
-  { to: "/users", label: "Users", permission: "platform.users.manage" },
-  { to: "/roles", label: "Roles", permission: "platform.users.manage" },
-  { to: "/setup", label: "Setup", permission: "company.settings.manage" },
-  { to: "/settings", label: "Settings", permission: "company.settings.manage" },
+interface NavGroup {
+  /** Section header; groups without a label render their links unheaded. */
+  label?: string;
+  links: NavItem[];
+}
+
+/**
+ * Sidebar sections, mirrored by domain so related screens stay together.
+ * A whole group is hidden when the user lacks every permission it requires.
+ */
+const NAV_GROUPS: NavGroup[] = [
+  {
+    links: [{ to: "/", label: "Dashboard" }],
+  },
+  {
+    label: "Sales",
+    links: [
+      { to: "/orders", label: "Sales Orders", permission: "sales.view" },
+      { to: "/shipments", label: "Shipments" },
+      { to: "/returns", label: "Returns" },
+    ],
+  },
+  {
+    label: "Supply",
+    links: [
+      { to: "/products", label: "Catalog", permission: "catalog.view" },
+      { to: "/partners", label: "Customers & Vendors" },
+      { to: "/purchase-orders", label: "Purchasing", permission: "purchasing.view" },
+      { to: "/inventory", label: "Inventory", permission: "inventory.view" },
+    ],
+  },
+  {
+    label: "Finance",
+    links: [
+      { to: "/invoices", label: "Invoices", permission: "invoicing.view" },
+      { to: "/payments", label: "Payments", permission: "payments.view" },
+      { to: "/accounting", label: "Accounting", permission: "accounting.journal.view" },
+      { to: "/reports", label: "Reports", permission: "reports.view" },
+      { to: "/payroll", label: "Payroll", permission: "payroll.view" },
+    ],
+  },
+  {
+    label: "Administration",
+    links: [
+      { to: "/users", label: "Users", permission: "platform.users.manage" },
+      { to: "/roles", label: "Roles", permission: "platform.users.manage" },
+      { to: "/audit", label: "Audit Log", permission: "audit.log.read" },
+      { to: "/setup", label: "Setup", permission: "company.settings.manage" },
+      { to: "/settings", label: "Settings", permission: "company.settings.manage" },
+    ],
+  },
 ];
 
 function Sidebar(): React.JSX.Element {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { hasPermission } = useAuth();
-  const links = NAV_LINKS.filter((item) => !item.permission || hasPermission(item.permission));
+
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    links: group.links.filter((item) => !item.permission || hasPermission(item.permission)),
+  })).filter((group) => group.links.length > 0);
 
   return (
     <nav className="sidebar">
       <div className="brand">ERP</div>
-      {links.map((item) => (
-        <Link key={item.to} to={item.to} className={pathname === item.to ? "active" : ""}>
-          {item.label}
-        </Link>
+      {visibleGroups.map((group, index) => (
+        group.label === undefined ? (
+          <div className="nav-ungrouped" key={index}>
+            {group.links.map((item) => (
+              <Link key={item.to} to={item.to} className={pathname === item.to ? "active" : ""}>
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="nav-group" key={index}>
+            <div className="nav-group-label">{group.label}</div>
+            {group.links.map((item) => (
+              <Link key={item.to} to={item.to} className={pathname === item.to ? "active" : ""}>
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        )
       ))}
     </nav>
   );

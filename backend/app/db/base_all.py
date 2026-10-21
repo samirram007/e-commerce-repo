@@ -7,6 +7,7 @@ from app.modules.periods import models as periods_models  # noqa: F401
 from app.modules.accounting import models as accounting_models  # noqa: F401
 from app.modules.taxes import models as taxes_models  # noqa: F401
 from app.modules.catalog import models as catalog_models  # noqa: F401
+from app.modules.storefront import models as storefront_models  # noqa: F401
 from app.modules.partners import models as partners_models  # noqa: F401
 from app.modules.storage import models as storage_models  # noqa: F401
 from app.modules.inventory import models as inventory_models  # noqa: F401

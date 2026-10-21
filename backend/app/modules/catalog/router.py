@@ -137,10 +137,19 @@ def create_uom(payload: UomIn, ctx: CompanyCtx = Depends(guard(P_CATALOG_MANAGE)
 def list_products(
     search: str | None = None,
     category_id: str | None = None,
+    stock_type: str | None = None,
+    is_active: bool | None = None,
     ctx: CompanyCtx = Depends(guard(P_CATALOG_VIEW)),
     session: Session = Depends(get_db),
 ):
-    rows = svc.list_products(session, ctx.company_id, search=search, category_id=category_id)
+    rows = svc.list_products(
+        session,
+        ctx.company_id,
+        search=search,
+        category_id=category_id,
+        stock_type=stock_type,
+        is_active=is_active,
+    )
     return {"items": [ProductOut.model_validate(p) for p in rows], "total": len(rows), "page": 1, "page_size": len(rows)}
 
 

@@ -76,7 +76,7 @@ export function LedgerTab() {
               loading={locations.isLoading}
             />
           </Field>
-          <Field label="Rows">
+          <Field label="Limit">
             <SheetSelect
               value={limit}
               options={LIMITS.map((value) => ({ value, label: value }))}

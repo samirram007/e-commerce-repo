@@ -58,7 +58,8 @@ export async function listRoles(): Promise<{ name: string; permissions: string[]
 }
 
 export function logout(): Promise<void> {
-  return api.post("/auth/logout").then(() => undefined);
+  // Short timeout so sign-out never hangs the redirect to /login.
+  return api.post("/auth/logout", null, { timeout: 5000 }).then(() => undefined);
 }
 
 export async function createCompany(input: {

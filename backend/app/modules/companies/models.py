@@ -23,14 +23,16 @@ class Company(Base, TimestampMixin, CreatedByMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     legal_name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
-    base_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    base_currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
-    locale: Mapped[str] = mapped_column(String(16), nullable=False, default="en-US")
+    locale: Mapped[str] = mapped_column(String(16), nullable=False, default="en-IN")
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     tax_identifier: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # posting/behavior settings
     allow_negative_stock: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     allow_guest_checkout: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # public storefront slug: /storefront/shop/store/{slug} resolves the store
+    storefront_slug: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # JSON map of default account codes used by posting rules, validated at setup
     default_account_codes: Mapped[str] = mapped_column(String(1000), nullable=False, default="{}")

@@ -13,10 +13,20 @@ import {
 } from "./schemas";
 
 export async function fetchProducts(
-  params: { search?: string; categoryId?: string } = {},
+  params: {
+    search?: string;
+    categoryId?: string;
+    stockType?: string;
+    isActive?: string;
+  } = {},
 ): Promise<ProductList> {
   const { data } = await api.get("/catalog/products", {
-    params: { search: params.search || undefined, category_id: params.categoryId || undefined },
+    params: {
+      search: params.search || undefined,
+      category_id: params.categoryId || undefined,
+      stock_type: params.stockType || undefined,
+      is_active: params.isActive || undefined,
+    },
   });
   return productListSchema.parse(data);
 }

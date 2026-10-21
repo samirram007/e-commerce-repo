@@ -103,6 +103,41 @@ def test_checkout_reserves_and_pays_end_to_end(client, auth_headers, master_data
     assert _gl_balanced(client, auth_headers)
 
 
+def test_checkout_applies_company_default_tax(client, auth_headers, master_data):
+    """Regression: quote_cart looked up the default rate via `taxes.TaxRate`,
+    a function-local import, so checkout 500'd once a default sales tax existed."""
+    data = master_data
+    resp = client.post(
+        "/api/v1/taxes",
+        headers=auth_headers,
+        json={
+            "code": "VAT10",
+            "name": "Sales VAT 10%",
+            "percentage": "10",
+            "is_default_sales": True,
+            "is_default_purchase": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    _add_to_cart(client, auth_headers, data["product_id"], "3")
+    resp = _checkout(client, auth_headers, data["customer_id"])
+    assert resp.status_code == 200, resp.text
+    order = resp.json()
+    # 3 x 20 = 60 goods + 5 shipping; 10% VAT must be baked into the total
+    assert float(order["total"]) > 65.0
+
+    # the persisted order carries the tax breakdown
+    detail = client.get(
+        f"/api/v1/storefront/orders/{order['order_id']}", headers=auth_headers
+    ).json()
+    assert float(detail["tax_total"]) > 0
+
+    resp = _pay(client, auth_headers, order["order_id"])
+    assert resp.status_code == 200, resp.text
+    assert _gl_balanced(client, auth_headers)
+
+
 def test_checkout_idempotent_replay(client, auth_headers, master_data):
     data = master_data
     _add_to_cart(client, auth_headers, data["product_id"], "1")

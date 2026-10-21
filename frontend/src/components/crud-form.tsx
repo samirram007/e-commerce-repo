@@ -4,9 +4,9 @@ import { fieldErrors } from "../lib/zod-utils";
 import { ErrorBanner, Field, Input, Modal, Button } from "./ui";
 import { SheetSelect, type SheetOption } from "./sheet";
 
-/**
+/** 
  * Global base form for CRUD screens.
- *
+ * 
  * Values are controlled strings (money/decimal inputs arrive from the API as
  * decimal strings — see `shared/money.py`), validation is a zod schema parsed
  * on submit, and backend field errors can be merged in via `setApiErrors`.
@@ -26,7 +26,10 @@ export function useCrudForm<TSchema extends z.ZodTypeAny>({
   const [values, setValues] = useState<z.input<TSchema>>(initialValues);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const setValue = useCallback(<K extends keyof z.input<TSchema>>(key: K, value: z.input<TSchema>[K]) => {
+  const setValue = useCallback(<K extends keyof z.input<TSchema>>(
+    key: K,
+    value: z.input<TSchema>[K],
+  ) => {
     setValues(
       (prev) =>
         ({ ...(prev as unknown as Record<string, unknown>), [key]: value }) as z.input<TSchema>,
@@ -43,9 +46,12 @@ export function useCrudForm<TSchema extends z.ZodTypeAny>({
   );
 
   /** Merge normalized backend errors (e.g. from ApiError.details) into the form. */
-  const setApiErrors = useCallback((next: Record<string, string>) => {
-    setErrors((prev) => ({ ...prev, ...next }));
-  }, []);
+  const setApiErrors = useCallback(
+    (next: Record<string, string>) => {
+      setErrors((prev) => ({ ...prev, ...next }));
+    },
+    [],
+  );
 
   const submit = useCallback(() => {
     const parsed = schema.safeParse(values);
@@ -73,6 +79,7 @@ export interface CrudFormLike {
   submit(): void;
 }
 
+/** Form field specification for `CrudFormModal`. */
 export interface FormFieldSpec {
   name: string;
   label: string;
@@ -138,8 +145,7 @@ export function CrudFormModal({
             {busy ? "Saving…" : submitLabel}
           </Button>
         </>
-      }
-    >
+      }>
       <ErrorBanner error={error} />
       {fields.map((field) => {
         const value = formValues[field.name];
@@ -185,8 +191,9 @@ export function CrudFormModal({
             <Input
               type={field.type === "money" || field.type === "number" ? "text" : "text"}
               inputMode={field.type === "money" || field.type === "number" ? "decimal" : undefined}
-              value={typeof value === "string" || typeof value === "number" ? String(value) : ""}
-              placeholder={field.placeholder}
+              value={
+                typeof value === "string" || typeof value === "number" ? String(value) : ""
+              }
               disabled={field.disabled}
               onChange={(event) => form.setValue(field.name as never, event.target.value as never)}
             />
