@@ -44,7 +44,7 @@ export function LoginPage() {
         return;
       }
       setPending(false);
-      navigate({ to: "/" });
+      navigate({ to: "/dashboard" });
       return;
     }
 
@@ -63,7 +63,7 @@ export function LoginPage() {
       return;
     }
     setPending(false);
-    navigate({ to: "/" });
+    navigate({ to: "/dashboard" });
   }
 
   return (

@@ -21,7 +21,7 @@ export const Route = createFileRoute("/_protected")({
 });
 
 type AppPath =
-  | "/"
+  | "/dashboard"
   | "/products"
   | "/partners"
   | "/orders"
@@ -59,7 +59,7 @@ interface NavGroup {
  */
 const NAV_GROUPS: NavGroup[] = [
   {
-    links: [{ to: "/", label: "Dashboard" }],
+    links: [{ to: "/dashboard", label: "Dashboard" }],
   },
   {
     label: "Sales",
