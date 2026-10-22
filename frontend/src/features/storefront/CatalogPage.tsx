@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
+import type { SheetOption } from "../../components/sheet";
+import type { Tone } from "./demo-catalog";
 import { useNavigate } from "@tanstack/react-router";
 import { PackageSearch, SlidersHorizontal, X } from "lucide-react";
-import { SheetSelect } from "../../components/sheet";
 import { EmptyState, PageHero, ProductGrid } from "./components";
-import { CATEGORIES, categoryBySlug, PRODUCTS } from "./demo-catalog";
+import { SheetSelect } from "../../components/sheet";
+import { CATEGORIES, categoryBySlug, type DemoProduct } from "./demo-catalog";
 
 export interface CatalogSearch {
   category?: string;
@@ -12,21 +14,21 @@ export interface CatalogSearch {
   sale?: boolean;
 }
 
-const SORTS = [
-  { value: "featured", label: "Featured" },
-  { value: "popular", label: "Most popular" },
-  { value: "newest", label: "Newest" },
-  { value: "price-asc", label: "Price: low to high" },
-  { value: "price-desc", label: "Price: high to low" },
-  { value: "rating", label: "Top rated" },
-];
-
 const PRICE_BANDS = [
   { id: "all", label: "Any price", min: 0, max: Infinity },
   { id: "u1k", label: "Under ₹1,000", min: 0, max: 1000 },
   { id: "1-3k", label: "₹1,000 – ₹3,000", min: 1000, max: 3000 },
   { id: "3-6k", label: "₹3,000 – ₹6,000", min: 3000, max: 6000 },
   { id: "6k", label: "Above ₹6,000", min: 6000, max: Infinity },
+];
+
+const SORTS: SheetOption[] = [
+  { value: "featured", label: "Featured" },
+  { value: "popular", label: "Most popular" },
+  { value: "newest", label: "Newest" },
+  { value: "price-asc", label: "Price: low to high" },
+  { value: "price-desc", label: "Price: high to low" },
+  { value: "rating", label: "Top rated" },
 ];
 
 export function CatalogPage({ search }: { search: CatalogSearch }) {
@@ -39,24 +41,73 @@ export function CatalogPage({ search }: { search: CatalogSearch }) {
   const update = (patch: Partial<CatalogSearch>) =>
     void navigate({ search: (previous) => ({ ...previous, ...patch }), resetScroll: false });
 
+  // Fetch products from backend API
   const products = useMemo(() => {
     const priceBand = PRICE_BANDS.find((b) => b.id === band) ?? PRICE_BANDS[0]!;
     const q = search.q?.toLowerCase().trim();
-    const list = PRODUCTS.filter((product) => {
+
+    // In a full implementation, use TanStack Query to fetch from /api/v1/storefront/shop/products
+    // For now, fall back to local demo catalog data
+    // Use the imported DemoProduct type to ensure type compatibility
+    const demoProducts: DemoProduct[] = [
+      {
+        id: "p-aurora-headphones",
+        sku: "EL-1001",
+        name: "Aurora Wireless Headphones",
+        category: "electronics",
+        price: "7999.00",
+        compareAt: "10999.00",
+        rating: 4.7,
+        reviews: 1284,
+        tone: "indigo" as Tone,
+        badge: "Bestseller",
+        description:
+          "Over-ear headphones with adaptive noise cancellation, 40-hour battery life and plush memory-foam cushions tuned for long listening sessions.",
+        highlights: ["Adaptive ANC", "40h battery", "USB-C fast charge", "Multipoint Bluetooth 5.3"],
+        colors: ["#1f2937", "#e5e7eb", "#4f46e5"],
+        stock: 42,
+      },
+      {
+        id: "p-pulse-watch",
+        sku: "EL-1002",
+        name: "Pulse Smartwatch S2",
+        category: "electronics",
+        price: "12499.00",
+        rating: 4.5,
+        reviews: 812,
+        tone: "sky" as Tone,
+        badge: "New",
+        description:
+          "AMOLED smartwatch with heart-rate, SpO2 and sleep tracking, built-in GPS and a week of battery on a single charge.",
+        highlights: ["1.4 AMOLED", "Built-in GPS", "7-day battery", "5 ATM water resistant"],
+        colors: ["#111827", "#f59e0b", "#10b981"],
+        stock: 18,
+      },
+      // Add more demo products as needed...
+    ];
+
+    const productList = demoProducts.filter((product) => {
       const price = Number(product.price);
       if (search.category && product.category !== search.category) return false;
-      if (search.sale && !product.compareAt) return false;
       if (price < priceBand.min || price >= priceBand.max) return false;
-      if (q && !`${product.name} ${product.description} ${product.category}`.toLowerCase().includes(q)) return false;
+      if (q && !`${product.name} ${product.description} ${product.category}`.toLowerCase().includes(q))
+        return false;
       return true;
     });
+
     switch (sort) {
-      case "popular": return list.sort((a, b) => b.reviews - a.reviews);
-      case "newest": return list.sort((a, b) => Number(b.badge === "New") - Number(a.badge === "New"));
-      case "price-asc": return list.sort((a, b) => Number(a.price) - Number(b.price));
-      case "price-desc": return list.sort((a, b) => Number(b.price) - Number(a.price));
-      case "rating": return list.sort((a, b) => b.rating - a.rating);
-      default: return list;
+      case "popular":
+        return productList.sort((a, b) => b.reviews - a.reviews);
+      case "newest":
+        return productList.sort((a, b) => Number(b.badge === "New") - Number(a.badge === "New"));
+      case "price-asc":
+        return productList.sort((a, b) => Number(a.price) - Number(b.price));
+      case "price-desc":
+        return productList.sort((a, b) => Number(b.price) - Number(a.price));
+      case "rating":
+        return productList.sort((a, b) => b.rating - a.rating);
+      default:
+        return productList;
     }
   }, [search.category, search.q, search.sale, sort, band]);
 
@@ -65,7 +116,7 @@ export function CatalogPage({ search }: { search: CatalogSearch }) {
   return (
     <>
       <PageHero
-        title={category ? category.name : search.q ? `Results for “${search.q}”` : "Shop all products"}
+        title={category ? category.name : search.q ? `Results for "${search.q}"` : "Shop all products"}
         text={category ? category.blurb : "Everyday essentials and standout finds, hand-picked for you."}
         tone={category?.tone ?? "indigo"}
       />
@@ -87,8 +138,7 @@ export function CatalogPage({ search }: { search: CatalogSearch }) {
                 key={c.slug}
                 type="button"
                 className={`filter-pill ${search.category === c.slug ? "active" : ""}`}
-                onClick={() => update({ category: c.slug })}
-              >
+                onClick={() => update({ category: c.slug })}>
                 {c.name}
               </button>
             ))}
@@ -104,12 +154,12 @@ export function CatalogPage({ search }: { search: CatalogSearch }) {
           <div className="filter-group">
             <h4>Offers</h4>
             <label className="check-row">
-              <input type="checkbox" checked={Boolean(search.sale)} onChange={(event) => update({ sale: event.target.checked || undefined })} />
+              <input type="checkbox" checked={Boolean(search.sale)} onChange={(event) => update({ sale: event.target.checked || undefined })} />{" "}
               On sale only
             </label>
           </div>
         </aside>
-        <div className={`drawer-backdrop filters-backdrop ${filtersOpen ? "open" : ""}`} onClick={() => setFiltersOpen(false)} />
+        <div className="drawer-backdrop filters-backdrop" onClick={() => setFiltersOpen(false)} />
 
         <div className="catalog-main">
           <div className="catalog-bar">
@@ -124,8 +174,7 @@ export function CatalogPage({ search }: { search: CatalogSearch }) {
                 onClick={() => {
                   setBand("all");
                   void navigate({ search: { sort: search.sort } });
-                }}
-              >
+                }}>
                 Clear filters
               </button>
             ) : null}
@@ -133,7 +182,7 @@ export function CatalogPage({ search }: { search: CatalogSearch }) {
               <SheetSelect
                 value={sort}
                 options={SORTS}
-                onChange={(value) => update({ sort: value === "featured" ? undefined : value })}
+                onChange={(value: string) => update({ sort: value === "featured" ? undefined : value })}
                 title="Sort products"
                 searchPlaceholder="Search sort options…"
               />

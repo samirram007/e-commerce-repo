@@ -32,7 +32,12 @@ PAYMENT_METHODS = [
 ]
 
 
-def _product_brief(p: Product) -> dict:
+def _product_brief(p: Product, session: Session) -> dict:
+    image_url = None
+    if p.image_file_id:
+        record = session.get(StoredFile, p.image_file_id)
+        if record is not None and record.company_id == p.company_id:
+            image_url = f"/storefront/shop/files/{p.image_file_id}"
     return {
         "id": p.id,
         "sku": p.sku,
@@ -42,6 +47,7 @@ def _product_brief(p: Product) -> dict:
         "price": str(p.base_price),
         "stock_type": p.stock_type,
         "view_count": p.view_count,
+        "image_url": image_url,
     }
 
 
@@ -127,7 +133,7 @@ def list_products(
         select(func.count()).select_from(stmt.order_by(None).subquery())
     ) or 0
     rows = session.execute(stmt.limit(limit).offset(offset)).scalars().all()
-    return {"items": [_product_brief(r) for r in rows], "total": total}
+    return {"items": [_product_brief(r, session) for r in rows], "total": total}
 
 
 def trending(session: Session, company_id: str, limit: int = 8) -> list[dict]:
@@ -142,7 +148,7 @@ def trending(session: Session, company_id: str, limit: int = 8) -> list[dict]:
         .order_by(Product.view_count.desc())
         .limit(limit)
     ).scalars().all()
-    return [_product_brief(r) for r in rows]
+    return [_product_brief(r, session) for r in rows]
 
 
 def product_detail(session: Session, company_id: str, product_id: str, *, count_view: bool) -> dict:
@@ -170,9 +176,9 @@ def product_detail(session: Session, company_id: str, product_id: str, *, count_
         .limit(8)
     ).scalars().all()
     return {
-        **_product_brief(product),
+        **_product_brief(product, session),
         "category_name": category.name if category else None,
-        "related": [_product_brief(r) for r in related],
+        "related": [_product_brief(r, session) for r in related],
     }
 
 
@@ -218,7 +224,7 @@ def list_interests(
         for row in rows:
             product = session.get(Product, row.product_id)
             if product is not None and product.is_active and product.is_sellable:
-                out[kind].append(_product_brief(product))
+                out[kind].append(_product_brief(product, session))
     return out
 
 

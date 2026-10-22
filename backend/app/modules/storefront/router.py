@@ -10,11 +10,12 @@ from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import AuthError, BusinessRuleError
+from app.core.exceptions import AuthError, BusinessRuleError, NotFoundError
 from app.core.security import decode_token
 from app.db.unit_of_work import get_db
 from app.modules.identity.models import User
 from app.modules.storefront import service as svc
+from app.shared.files import open_file, StoredFile
 
 router = APIRouter(prefix="/storefront/shop")
 
@@ -232,6 +233,17 @@ def guest_cart_clear(
     session.flush()
     return svc.guest_cart_out(session, ctx.company_id, token)
 
+
+# ---- file serving ----
+@router.get("/files/{file_id}")
+def serve_file(file_id: str, ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
+    """Serve stored file (product images, invoices, receipts) from the backend."""
+    record = session.get(StoredFile, file_id)
+    if record is None or (record.company_id != ctx.company_id and record.visibility == "private"):
+        raise NotFoundError("File")
+    _, path = open_file(session, file_id, company_id=ctx.company_id)
+    from fastapi.responses import FileResponse
+    return FileResponse(path=path)
 
 # ---- store info (public bootstrap: resolves the shop by slug) ----
 @router.get("/store/{slug}")
