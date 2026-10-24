@@ -18,8 +18,8 @@ from app.modules.purchasing.router import router as purchasing_router
 from app.modules.reports.router import router as reports_router
 from app.modules.returns.router import router as returns_router
 from app.modules.sales.router import router as sales_router
-from app.modules.storefront.router import router as storefront_router
 from app.modules.storage.router import router as storage_router
+from app.modules.storefront.admin_router import router as storefront_admin_router
 from app.modules.storefront.router import router as storefront_router
 from app.modules.taxes.router import router as taxes_router
 
@@ -45,3 +45,4 @@ api_router.include_router(reports_router)
 api_router.include_router(periods_router)
 api_router.include_router(audit_router)
 api_router.include_router(storefront_router)
+api_router.include_router(storefront_admin_router)

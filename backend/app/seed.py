@@ -132,6 +132,10 @@ def run_seed() -> None:
             _seed_demo_catalog(session, company, admin)
             _seed_demo_partners(session, company, admin)
             _seed_storefront_zones(session, company, admin)
+            # public storefront content (categories/products/hero/faqs/policies)
+            from app.seed_data.storefront import seed_storefront
+
+            seed_storefront(session, company, admin)
 
             if created_company:
                 # demo payroll: three employees + a draft run for the current month

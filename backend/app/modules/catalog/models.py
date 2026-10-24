@@ -3,11 +3,14 @@ plus storefront interest (favorites/watchlist)."""
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.security import new_id
 from app.db.base import Base, CreatedByMixin, TimestampMixin
+
+#: Badge values a product can carry on the storefront (New/Sale/Bestseller/Limited).
+PRODUCT_BADGES = ("New", "Sale", "Bestseller", "Limited")
 
 
 class Category(Base, TimestampMixin, CreatedByMixin):
@@ -17,6 +20,15 @@ class Category(Base, TimestampMixin, CreatedByMixin):
     company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("categories.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # storefront presentation fields (public shop renders from these)
+    slug: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    blurb: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    tone: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    image_file_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+
+    __table_args__ = (UniqueConstraint("company_id", "slug", name="uq_categories_company_slug"),)
 
 
 class UnitOfMeasure(Base, TimestampMixin):
@@ -68,8 +80,41 @@ class Product(Base, TimestampMixin, CreatedByMixin):
     is_purchasable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # storefront counters (monotonic; drives the "trending" rail)
     view_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # ---- storefront presentation fields ----
+    # `base_price` stays the selling price; `compare_at_price` is the optional
+    # pre-discount anchor used to compute the discount server-side.
+    compare_at_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    badge: Mapped[str | None] = mapped_column(String(16), nullable=True)  # New|Sale|Bestseller|Limited
+    highlights: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str]
+    colors: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str] (hex swatches)
+    rating_avg: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
+    rating_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    tone: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    slug: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
 
-    __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),
+        UniqueConstraint("company_id", "slug", name="uq_products_company_slug"),
+    )
+
+
+class ProductImage(Base, TimestampMixin, CreatedByMixin):
+    """A gallery photo for a product.
+
+    `Product.image_file_id` remains the single cover/primary image (kept so
+    existing admin flows and rows keep working); `ProductImage` rows are the
+    ordered gallery and always include the cover as their first row when one is
+    set through the storefront admin.
+    """
+
+    __tablename__ = "product_images"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(String(36), ForeignKey("products.id"), nullable=False, index=True)
+    file_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    alt: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class PriceList(Base, TimestampMixin, CreatedByMixin):

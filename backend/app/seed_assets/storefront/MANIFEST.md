@@ -4,9 +4,10 @@
 use, attribution appreciated; see <https://unsplash.com/license>). All files are
 JPEG, verified (format + size) at fetch time.
 
-These images back the demo catalog in `frontend/src/features/storefront/`, which
-serves them through the `ImagePlaceholder` component's `src` prop (see the image
-helpers in `demo-catalog.ts`). The tones remain as loading/error fallbacks.
+These images seed the backend storefront (`python -m app.seed`): each photo is
+registered as a public `StoredFile` and served through
+`/api/v1/storefront/shop/media/{company_id}/{file_id}`. The `tone` fields remain
+as loading/error fallbacks in the frontend's `ImagePlaceholder` component.
 
 ## Attribution sources
 
