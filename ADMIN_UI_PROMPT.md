@@ -1,21 +1,23 @@
-# Task: Scaffold a separate `admin-ui/` app (TanStack Router) with login + protected routes
+# Task: Scaffold a separate `apps/admin/` app (TanStack Router) with login + protected routes
 
-You are working in a monorepo with `backend/` (FastAPI) and `frontend/` (the storefront + current
+You are working in a monorepo with `apps/api/` (FastAPI) and `apps/web/` (the storefront + current
 ERP screens). **Read `AGENTS.md` and `AGENT.md` first and follow them.** Create a new, independent
-admin app in **`admin-ui/`** at the repo root. Do **not** modify `frontend/` in this task, except
+admin app in **`apps/admin/`** (the root `pnpm-workspace.yaml` already globs `apps/*`, so a new
+folder there is picked up automatically). Do **not** modify `apps/web/` in this task, except
 to read it for reference.
 
-## Stack — match `frontend/package.json` exactly (same major versions)
+## Stack — match `apps/web/package.json` exactly (same major versions)
 
 - [ ] React 19 + strict TypeScript, Vite 8, `@vitejs/plugin-react`, Tailwind 4 via `@tailwindcss/vite`.
-  (`AGENTS.md` says React 18, but `frontend/package.json` is on 19, so use 19.)
+  (`AGENTS.md` says React 18, but `apps/web/package.json` is on 19, so use 19.)
 - [ ] `@tanstack/react-router` + `@tanstack/router-plugin` (**file-based routing**), `@tanstack/react-query`,
   Axios, zod 4, `react-aria-components`, `lucide-react`, `clsx` + `tailwind-merge`, vitest.
-- [ ] **pnpm only**: copy `frontend/scripts/ensure-pnpm.mjs`, add the `preinstall` guard, and pin
-  `packageManager` and `engines` the same way. Commit `pnpm-lock.yaml`.
+- [ ] **pnpm only**: copy `apps/web/scripts/ensure-pnpm.mjs` and add the `preinstall` guard.
+  `packageManager`/`engines` are pinned in the **root** `package.json` and the single
+  `pnpm-lock.yaml` lives at the repo root — run `pnpm install` there and commit the updated lockfile.
 - [ ] Scripts: `dev`, `build` (`vite build && tsc -b`), `preview`, `test` (`vitest run`), `typecheck`.
 - [ ] `vite.config.ts`: same `tanstackRouter({ target: "react", autoCodeSplitting: true, routesDirectory: "./src/routes", generatedRouteTree: "./src/routeTree.gen.ts" })`, `@` → `src` alias,
-  **port 5174**, and a proxy `/api` → `VITE_API_PROXY ?? "http://127.0.0.1:8000"` (use IPv4, as `frontend/` does).
+  **port 5174**, and a proxy `/api` → `VITE_API_PROXY ?? "http://127.0.0.1:8000"` (use IPv4, as `apps/web/` does).
 - [ ] Don't hand-edit `routeTree.gen.ts`.
 
 ## Backend contract (already exists — do not change the backend's auth behavior)
@@ -30,7 +32,7 @@ to read it for reference.
   traffic goes through the Vite proxy, so CORS doesn't matter in dev. Add `http://localhost:5174` to
   the default `cors_origins` anyway and note it. This is the **only** backend change allowed.
 
-## Auth layer (port the patterns from `frontend/src/auth` and `frontend/src/lib`; don't import across apps)
+## Auth layer (port the patterns from `apps/web/src/auth` and `apps/web/src/lib`; don't import across apps)
 
 - `src/lib/api-client.ts`: Axios with `baseURL: "/api/v1"`, `withCredentials: true`, a bearer token +
   `X-Company-Id` interceptor, and **single-flight refresh on 401** with one retry. It rejects with `ApiError`.
@@ -71,7 +73,7 @@ to read it for reference.
 - `_protected/profile.tsx` → `/profile`: shows `/auth/me` data.
 - `_protected/forbidden.tsx` → `/forbidden`.
 - Add placeholder routes for the admin sections the next tasks will fill in, each gated by its
-  permission (the names come from `backend/app/core/permissions.py`, so look them up; don't invent them):
+  permission (the names come from `apps/api/app/core/permissions.py`, so look them up; don't invent them):
 
   - `products`
   - `categories`
@@ -86,7 +88,7 @@ to read it for reference.
   array (`src/config/nav.ts`: label, icon, path, permission) as the single source of truth for both
   the sidebar and the route checks.
 
-## UI conventions (same as `frontend/`)
+## UI conventions (same as `apps/web/`)
 
 - Put shared primitives in `src/components/`: `ui.tsx` (Button, Input, Card, etc.), plus `sheet.tsx`
   with a **`SheetSelect`** (a searchable slide-over). **Never use a native `<select>`.**
@@ -98,13 +100,13 @@ to read it for reference.
 
 ## Infra & docs
 
-- `admin-ui/.env.example` (`VITE_API_PROXY`), `admin-ui/README.md` (setup, scripts, route map, auth flow).
+- `apps/admin/.env.example` (`VITE_API_PROXY`), `apps/admin/README.md` (setup, scripts, route map, auth flow).
 - Add an `admin` service to `docker-compose.yml` mirroring `web` (port 5174). Note that there's still
   no Dockerfile, consistent with the current repo state.
 - Update root `AGENTS.md`:
-  - add `admin-ui/` to Layout
+  - add `apps/admin/` to Layout
   - add its commands and route structure
-- `.gitignore`: `admin-ui/node_modules`, `admin-ui/dist`.
+- `.gitignore`: `apps/admin/node_modules`, `apps/admin/dist`.
 
 ## Tests & verification
 
@@ -113,10 +115,10 @@ to read it for reference.
   - the `_protected` redirect when there's no session
   - the login form's validation and error display (mock Axios)
   - `hasPermission`
-- Run these from `admin-ui/`; each must exit 0:
-  - `corepack enable && pnpm install`
-  - `pnpm build`
-  - `pnpm test`
+- Each must exit 0:
+  - `corepack enable && pnpm install` (at the repo root)
+  - `pnpm build` / `pnpm test` from `apps/admin/`, or from the root as
+    `pnpm build --filter=<admin package name>`
 - Manually, with the backend running (`uv run uvicorn app.main:app --reload`) and the seed loaded
   (`uv run python -m app.seed`), run `pnpm dev`. Check that:
   - `/` redirects to `/login?redirect=…`

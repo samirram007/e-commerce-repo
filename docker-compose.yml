@@ -27,7 +27,7 @@ services:
 
   api:
     build:
-      context: ./backend
+      context: ./apps/api
     depends_on:
       db:
         condition: service_healthy
@@ -47,7 +47,7 @@ services:
 
   web:
     build:
-      context: ./frontend
+      context: ./apps/web
     depends_on:
       - api
     environment:

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Period-context shapes mirroring `backend/app/modules/periods/schemas.py`.
+ * Period-context shapes mirroring `apps/api/app/modules/periods/schemas.py`.
  *
  * A *reporting period* is a private, named date range owned by the signed-in
  * user; the *period context* is that user's persisted selection of an active

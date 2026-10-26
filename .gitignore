@@ -9,31 +9,32 @@ venv/
 dist/
 build/
 *.egg-info/
-backend/.env
-backend/media/
+apps/api/.env
+apps/api/media/
 *.db
 *.sqlite3
 
 # Node
 node_modules/
-frontend/dist/
+apps/web/dist/
 .vite/
 *.tsbuildinfo
+.turbo/
 
-# Env / secrets — committed: .env.example, backend/.env.development,
-# backend/.env.testing, frontend/.env.development, frontend/.env.production.
+# Env / secrets — committed: .env.example, apps/api/.env.development,
+# apps/api/.env.testing, apps/web/.env.development, apps/web/.env.production.
 # Everything else (local overrides, prod files) stays out of git.
 .env
 .env.local
 .env.*.local
-backend/.env
-backend/.env.production
+apps/api/.env
+apps/api/.env.production
 !/.env.example
-!/backend/.env.example
-!/backend/.env.development
-!/backend/.env.testing
-!/frontend/.env.development
-!/frontend/.env.production
+!/apps/api/.env.example
+!/apps/api/.env.development
+!/apps/api/.env.testing
+!/apps/web/.env.development
+!/apps/web/.env.production
 # Editors / OS
 .idea/
 .vscode/

@@ -1,4 +1,4 @@
-"""Centralized application settings (loaded from backend/.env files or environment).
+"""Centralized application settings (loaded from apps/api/.env files or environment).
 
 Environment file contract (priority: process env > dotenv files in order,
 *last* file in a tuple wins):

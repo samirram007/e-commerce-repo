@@ -1,0 +1,20 @@
+{
+  "name": "erp-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@12.10.1",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "preinstall": "node apps/web/scripts/ensure-pnpm.mjs",
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "migrate": "turbo run migrate"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.10"
+  }
+}

@@ -319,7 +319,7 @@ export const POLICIES: Record<string, { title: string; updated: string; sections
   },
 };
 
-/* ---- local imagery (downloaded stock photos, see frontend/public/images/MANIFEST.md) ---- */
+/* ---- local imagery (downloaded stock photos, see apps/web/public/images/MANIFEST.md) ---- */
 
 const IMAGE_BASE = "/images";
 

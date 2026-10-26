@@ -6,13 +6,27 @@ repo-specific facts that are easy to get wrong.
 
 ## Layout
 
-- `backend/` — FastAPI + SQLAlchemy 2.x + Alembic, Python 3.12, managed by `uv`.
-- `frontend/` — React 18 + strict TypeScript + Vite, TanStack Router/Query, Axios.
-- `docker-compose.yml` (root) — postgres 16, redis 7, `api`, `web`.
+**Turborepo + pnpm workspace** — root `package.json` (`turbo` devDependency + `packageManager`
+pin), `pnpm-workspace.yaml` (`packages: ["apps/*"]`), `turbo.json` (tasks `build`, `dev`, `test`,
+`migrate`). Install from the repo root; the single `pnpm-lock.yaml` lives at the root.
+
+- `apps/api/` — FastAPI + SQLAlchemy 2.x + Alembic, Python 3.12, managed by `uv` (npm package `erp-backend`, scripts shell out to `uv`).
+- `apps/web/` — React 18 + strict TypeScript + Vite, TanStack Router/Query, Axios (npm package `erp-frontend`).
+- `docker-compose.yml` (root) — postgres 16, redis 7, `api`, `web` (build contexts `./apps/api`, `./apps/web`).
 
 ## Commands
 
-Backend (run from `backend/`):
+Root (Turborepo orchestrates both apps):
+
+- `pnpm install` — install workspace deps from the repo root (do not use npm; the `preinstall` guard still blocks it).
+- `pnpm dev` — `turbo run dev`: uvicorn `:8000` + Vite `:5173` concurrently.
+- `pnpm build` — `turbo run build`: frontend `vite build && tsc -b` (the backend has no build
+  step — `uv run` syncs `apps/api/.venv` on demand).
+- `pnpm test` — `turbo run test`: `uv run pytest` and `vitest run`.
+- `pnpm migrate` — `turbo run migrate`: `uv run alembic upgrade head` (never cached).
+- Scope with `--filter`: package names are `erp-backend` / `erp-frontend`, e.g. `pnpm build --filter=erp-frontend`.
+
+Backend (run from `apps/api/`):
 
 - `uv sync` — install deps (`.venv/` already present).
 
@@ -25,33 +39,41 @@ Backend (run from `backend/`):
 - `uv run python -m app.seed` — idempotent seed: admin + demo company/chart/warehouse.
 - No backend lint/format/typecheck tool is configured. `.gitignore` mentions `.ruff_cache`/`.mypy_cache` but neither is wired up.
 
-Frontend (run from `frontend/`) — **pnpm only** (npm/yarn are blocked by the
-`preinstall` guard in `scripts/ensure-pnpm.mjs`; `packageManager` pins pnpm):
+Frontend (run from `apps/web/`, or from root with `pnpm --filter erp-frontend <script>`) —
+**pnpm only** (npm/yarn are blocked by the `preinstall` guard in `scripts/ensure-pnpm.mjs`;
+`packageManager` pins pnpm at the root):
 
-- `corepack enable` (once) then `pnpm install` — install deps (`pnpm-lock.yaml`; do not use npm).
+- `pnpm install` — workspace install happens at the repo root (`pnpm-lock.yaml` at root; do not use npm).
 - `pnpm dev` — Vite `:5173`, proxies `/api` → `VITE_API_PROXY ?? http://localhost:8000`.
 - `pnpm build` — `vite build && tsc -b` (vite regenerates `routeTree.gen.ts`, then tsc typechecks).
 
 ## Current state (verify before assuming these still hold)
 
-- Frontend typechecks and builds (**verified**: `pnpm build` exits 0). Routing is
-  file-based under `src/routes/` (see below), not the old `src/routes.tsx`.
-- `pnpm test` runs `vitest run`, but there are **no test files and no vitest config**, so it exits 1.
-- Backend tests pass (31 tests). `tests/conftest.py` builds the schema with
+- Routing is file-based under `src/routes/` (see below), not the old `src/routes.tsx`.
+- **`pnpm build` fails (pre-existing, NOT caused by the Turborepo layout — verified by running
+  `pnpm build` on an untouched HEAD worktree): the TanStack router generator aborts with
+  `Conflicting configuration paths … "/"` between `src/routes/_admin.tsx` and
+  `src/routes/_shop/index.tsx`, so `routeTree.gen.ts` is never regenerated and `tsc -b` then
+  errors `src/routes/_admin.tsx(4,38): TS2345 "…/_admin" not assignable to keyof FileRoutesByPath`.
+  Fix the route conflict, then let vite regenerate `routeTree.gen.ts`.
+- `pnpm test` passes (**verified** through turbo): `vitest run` → 8 tests in
+  `src/hooks/use-list-state.test.ts`; `uv run pytest` → 94 tests.
+- Backend tests pass (94 tests). `tests/conftest.py` builds the schema with
   `Base.metadata.create_all`, **not** Alembic, and overrides env vars before app import.
-- Two Alembic revisions exist: `5d98e9df63ca_initial_schema.py` and
-  `649d352f339d_add_blamable_to_created_by_mixin.py` (adds `blamable` to 25 tables).
+- There are **10** Alembic revisions in `apps/api/migrations/versions/` (head:
+  `a7c3e91f5d20_storefront_content_and_public_media.py`); `649d352f339d` added `blamable`
+  to 25 tables.
 - `psycopg[binary]` is a dependency on **all platforms now** (the old
   `platform_system != 'Windows'` marker was removed), so Windows dev can target Postgres.
   With no `DATABASE_URL`, the code default is still `sqlite:///./erp_dev.db`.
-- `backend/.env` may point at a **local PostgreSQL** (this machine runs the
+- `apps/api/.env` may point at a **local PostgreSQL** (this machine runs the
   `postgresql-x64-18` Windows service, not docker-compose). If the password contains
   URL-reserved characters (`@`, `:`, `/`, `%`), percent-encode them in the URL (e.g. `@` →
   `%40`); `migrations/env.py` escapes `%` for Alembic's ConfigParser interpolation.
 - **SQLite tests do not enforce `VARCHAR` length** (or other dialect constraints); Postgres
   does. Postgres-only bugs (e.g. a string too long for a sized column) will **not** appear in
   `uv run pytest` — run the API against Postgres for real end-to-end confidence.
-- Neither `backend/` nor `frontend/` has a `Dockerfile`, although `docker-compose.yml`
+- Neither `apps/api/` nor `apps/web/` has a `Dockerfile`, although `docker-compose.yml`
   declares `build:` contexts for both — so `docker compose build` cannot succeed as-is.
 
 ## Backend architecture (non-obvious)

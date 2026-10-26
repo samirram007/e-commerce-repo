@@ -83,7 +83,7 @@ Adapt this structure to the existing repository if it already has a sound equiva
 
 ```text
 project/
-├── backend/
+├── apps/api/            (backend — a Turborepo/pnpm workspace package)
 │   ├── app/
 │   │   ├── main.py
 │   │   ├── api/
@@ -130,7 +130,7 @@ project/
 │   ├── pyproject.toml
 │   ├── alembic.ini
 │   └── .env.example
-├── frontend/
+├── apps/web/            (frontend — a Turborepo/pnpm workspace package)
 │   ├── src/
 │   │   ├── app/
 │   │   ├── routes/

@@ -52,8 +52,7 @@ as loading/error fallbacks in the frontend's `ImagePlaceholder` component.
 ## Notes
 
 - Product images are 900px wide, category/hero images 1600px wide.
-- Image content follows the demo catalog in
-  `frontend/src/features/storefront/demo-catalog.ts`: one image per product
+- Image content follows the demo catalog in   `apps/web/src/features/storefront/demo-catalog.ts`: one image per product
   `id` (e.g. `p-aurora-headphones` → `images/products/p-aurora-headphones.jpg`),
   per category `slug`, per hero `category`, and a contact-page map image.
 - If any photo turns out to be off-brand or needs replacing, re-run a fetch with
