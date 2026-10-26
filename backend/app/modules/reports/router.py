@@ -41,6 +41,16 @@ def delivery_performance(
     return svc.delivery_performance(session, ctx.company_id, from_date=None, to_date=None)
 
 
+@router.get("/gst-summary")
+def gst_summary(
+    from_date: date | None = None,
+    to_date: date | None = None,
+    ctx: CompanyCtx = Depends(guard(P_REPORTS_VIEW)),
+    session: Session = Depends(get_db),
+):
+    return svc.gst_summary(session, ctx.company_id, from_date=from_date, to_date=to_date)
+
+
 @router.get("/stock-valuation")
 def stock_valuation(ctx: CompanyCtx = Depends(guard(P_REPORTS_VIEW)), session: Session = Depends(get_db)):
     return svc.stock_valuation(session, ctx.company_id)

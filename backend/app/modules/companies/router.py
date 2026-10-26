@@ -8,6 +8,8 @@ from app.db.unit_of_work import get_db
 from app.modules.audit.service import log_action
 from app.modules.companies import service as svc
 from app.modules.companies.schemas import (
+    CompanyAddressIn,
+    CompanyAddressOut,
     CompanyCreateIn,
     CompanyOut,
     CompanyUpdateIn,
@@ -52,9 +54,113 @@ def create_company(
         address=payload.address,
         tax_identifier=payload.tax_identifier,
         owner_user_id=user.id,
+        addresses=payload.addresses,
     )
     log_action(session, action="company.created", entity_type="company", entity_id=company.id, actor_user_id=user.id)
     return CompanyOut.model_validate(company)
+
+
+@router.get("/companies/{company_id}/addresses", response_model=list[CompanyAddressOut])
+def list_company_addresses(
+    company_id: str, ctx: CompanyCtx = Depends(guard(P_COMPANY_SETTINGS)), session: Session = Depends(get_db)
+):
+    _check_scope(ctx, company_id)
+    from app.modules.companies.models import CompanyAddress
+    addresses = session.execute(select(CompanyAddress).where(CompanyAddress.company_id == company_id)).scalars().all()
+    return [CompanyAddressOut.model_validate(a) for a in addresses]
+
+
+@router.post("/companies/{company_id}/addresses", response_model=CompanyAddressOut, status_code=201)
+def add_company_address(
+    company_id: str,
+    payload: CompanyAddressIn,
+    ctx: CompanyCtx = Depends(guard(P_COMPANY_SETTINGS)),
+    session: Session = Depends(get_db),
+):
+    _check_scope(ctx, company_id)
+    from app.modules.companies.models import CompanyAddress
+    from sqlalchemy import select
+
+    # Check if address already exists for this company+type
+    existing = session.scalar(
+        select(CompanyAddress).where(
+            CompanyAddress.company_id == company_id,
+            CompanyAddress.address_type == payload.address_type
+        )
+    )
+    if existing:
+        # Update existing
+        existing.line1 = payload.line1
+        existing.line2 = payload.line2
+        existing.city = payload.city
+        existing.region = payload.region
+        existing.postal_code = payload.postal_code
+        existing.country = payload.country
+        existing.tax_identifier = payload.tax_identifier
+        existing.is_default = payload.is_default
+        session.flush()
+        return CompanyAddressOut.model_validate(existing)
+    # Create new
+    new_addr = CompanyAddress(
+        company_id=company_id,
+        address_type=payload.address_type,
+        line1=payload.line1,
+        line2=payload.line2,
+        city=payload.city,
+        region=payload.region,
+        postal_code=payload.postal_code,
+        country=payload.country,
+        tax_identifier=payload.tax_identifier,
+        is_default=payload.is_default,
+    )
+    session.add(new_addr)
+    session.flush()
+    return CompanyAddressOut.model_validate(new_addr)
+
+
+@router.patch("/companies/{company_id}/addresses/<address_id>", response_model=CompanyAddressOut)
+def update_company_address(
+    company_id: str,
+    address_id: str,
+    payload: CompanyAddressIn,
+    ctx: CompanyCtx = Depends(guard(P_COMPANY_SETTINGS)),
+    session: Session = Depends(get_db),
+):
+    _check_scope(ctx, company_id)
+    from app.modules.companies.models import CompanyAddress
+
+    addr = session.get(CompanyAddress, address_id)
+    if addr is None or addr.company_id != company_id:
+        raise NotFoundError("Address")
+    addr.address_type = payload.address_type
+    addr.line1 = payload.line1
+    addr.line2 = payload.line2
+    addr.city = payload.city
+    addr.region = payload.region
+    addr.postal_code = payload.postal_code
+    addr.country = payload.country
+    addr.tax_identifier = payload.tax_identifier
+    addr.is_default = payload.is_default
+    session.flush()
+    return CompanyAddressOut.model_validate(addr)
+
+
+@router.delete("/companies/{company_id}/addresses/<address_id>", status_code=204)
+def delete_company_address(
+    company_id: str,
+    address_id: str,
+    ctx: CompanyCtx = Depends(guard(P_COMPANY_SETTINGS)),
+    session: Session = Depends(get_db),
+):
+    _check_scope(ctx, company_id)
+    from app.modules.companies.models import CompanyAddress
+
+    addr = session.get(CompanyAddress, address_id)
+    if addr is None or addr.company_id != company_id:
+        raise NotFoundError("Address")
+    session.delete(addr)
+    session.flush()
+    return Response(status_code=204)
 
 
 @router.get("/companies/{company_id}", response_model=CompanyOut)

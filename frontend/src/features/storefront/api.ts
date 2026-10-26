@@ -22,7 +22,10 @@ import type {
   ShopProduct,
   ShopProductDetail,
   ShopProductPage,
+  ShopReturn,
   StoreInfo,
+  RazorpayOrderIntent,
+  RazorpayVerifyPayload,
 } from "./types";
 
 /** Axios instance bound to the public storefront API. */
@@ -192,8 +195,43 @@ export async function fetchOrders(): Promise<ShopOrder[]> {
   return response.data;
 }
 
-/** Pay a previously placed (unpaid) order — "continue purchase". */
+/** Pay a previously placed (unpaid) order — "continue purchase" (sandbox). */
 export async function payOrder(orderId: string, method: string): Promise<ShopOrder> {
   const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/pay`, { method });
+  return response.data;
+}
+
+/** Create (or reuse) the Razorpay order that Checkout opens with. */
+export async function createRazorpayOrder(orderId: string): Promise<RazorpayOrderIntent> {
+  const response = await shopApi.post<RazorpayOrderIntent>(`/orders/${orderId}/razorpay`);
+  return response.data;
+}
+
+/** Server verifies the Checkout signature, then marks the order paid. */
+export async function verifyRazorpayPayment(
+  orderId: string,
+  payload: RazorpayVerifyPayload,
+): Promise<ShopOrder> {
+  const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/razorpay/verify`, payload);
+  return response.data;
+}
+
+/** Cancel an order; paid orders are refunded and credited server-side. */
+export async function cancelOrder(orderId: string): Promise<ShopOrder> {
+  const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/cancel`);
+  return response.data;
+}
+
+export async function fetchOrderReturns(orderId: string): Promise<ShopReturn[]> {
+  const response = await shopApi.get<ShopReturn[]>(`/orders/${orderId}/returns`);
+  return response.data;
+}
+
+export async function requestOrderReturn(
+  orderId: string,
+  lines: { product_id: string; qty: number }[],
+  notes?: string,
+): Promise<ShopReturn> {
+  const response = await shopApi.post<ShopReturn>(`/orders/${orderId}/returns`, { lines, notes });
   return response.data;
 }

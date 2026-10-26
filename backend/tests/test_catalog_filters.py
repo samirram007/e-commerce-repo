@@ -70,3 +70,25 @@ def test_products_search_matches_name_sku_and_barcode(client, auth_headers):
     assert [p["id"] for p in _list(client, auth_headers, search="9990001112223")] == [
         barcoded["id"]
     ]
+
+
+def test_product_hsn_sac_code_is_validated_and_returned(client, auth_headers):
+    product = _create_product(client, auth_headers, name="Cable", hsn_sac="85444299")
+    assert product["hsn_sac"] == "85444299"
+
+    patched = client.patch(
+        f"/api/v1/catalog/products/{product['id']}",
+        headers=auth_headers,
+        json={"hsn_sac": "8517"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["hsn_sac"] == "8517"
+
+    # HSN is 4-8 digits and SAC is 6; anything else is rejected
+    bad = client.post(
+        "/api/v1/catalog/products",
+        headers=auth_headers,
+        json={"sku": "BAD-HSN-1", "name": "Bad", "hsn_sac": "85A1"},
+    )
+    assert bad.status_code == 400, bad.text
+    assert bad.json()["error"]["code"] == "BAD_HSN_SAC"

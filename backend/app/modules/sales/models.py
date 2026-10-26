@@ -10,6 +10,8 @@ from app.core.security import new_id
 from app.db.base import Base, CreatedByMixin, TimestampMixin
 
 ORDER_STATUSES = ["pending_payment", "paid", "confirmed", "fulfilling", "shipped", "delivered", "cancelled", "refunded"]
+#: Why an order was cancelled — surfaced to the shopper on their orders page.
+CANCEL_REASONS = ["cancelled_by_customer", "cancelled_by_staff", "payment_timeout"]
 CART_STATUSES = ["open", "converted", "abandoned"]
 
 
@@ -62,6 +64,8 @@ class SalesOrder(Base, TimestampMixin, CreatedByMixin):
     cart_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # one of CANCEL_REASONS; null for orders cancelled before the field existed
+    cancel_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class OrderLine(Base, TimestampMixin):

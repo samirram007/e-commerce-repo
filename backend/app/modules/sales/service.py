@@ -2,7 +2,7 @@
 order lifecycle. Backend recomputes prices/taxes — client values are ignored.
 """
 from dataclasses import asdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -158,12 +158,20 @@ def quote_cart(session: Session, cart: Cart, *, shipping_total=Decimal("0")) -> 
         )
     shipping = money(dec(shipping_total), 2)
     total = money(subtotal - discount_total + tax_total + shipping, 2)
+    # GST is charged at one rate here, so the breakup has a single slab; the UI
+    # renders it as "GST 18% · CGST 9% + SGST 9%" instead of an unlabelled "Tax".
+    tax_breakup = (
+        [{"rate": str(default_tax), "amount": str(tax_total)}]
+        if default_tax > 0 and tax_total > 0
+        else []
+    )
     return {
         "cart_id": cart.id,
         "lines": lines,
         "subtotal": str(subtotal),
         "discount_total": str(discount_total),
         "tax_total": str(tax_total),
+        "tax_breakup": tax_breakup,
         "shipping_total": str(shipping),
         "total": str(total),
         "currency": company.base_currency,
@@ -363,6 +371,144 @@ def _pay_once(
     return order
 
 
+def accept_cash_on_delivery(
+    session: Session, *, company_id: str, order: SalesOrder, actor_user_id: str | None = None
+) -> PaymentRecord:
+    """Take a COD order: confirm it for fulfilment with an open cash receipt.
+
+    Nothing is recognised yet — the invoice is issued when the courier hands the
+    cash over (see `collect_cash_on_delivery`).
+    """
+    from app.modules.companies.service import rate_for
+
+    company = _company(session, company_id)
+    if order.status != "pending_payment":
+        raise BusinessRuleError(
+            "ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be confirmed for COD"
+        )
+    existing = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.order_id == order.id,
+            PaymentRecord.provider == "cash",
+            PaymentRecord.direction == "receipt",
+        )
+    )
+    if existing is not None:
+        return existing
+    exchange_rate = dec(
+        rate_for(
+            session,
+            company_id=company_id,
+            from_currency=order.currency,
+            base_currency=company.base_currency,
+            on_date=order.order_date,
+        )
+    )
+    record = PaymentRecord(
+        company_id=company_id,
+        direction="receipt",
+        method="cod",
+        provider="cash",
+        provider_ref=f"cod:{order.id}",
+        status="pending",
+        amount=dec(order.total),
+        currency=order.currency,
+        exchange_rate=exchange_rate,
+        amount_base=money(dec(order.total) * exchange_rate, 2),
+        customer_id=order.customer_id,
+        order_id=order.id,
+        occurred_at=datetime.now(timezone.utc),
+        idempotency_scope="cod",
+        notes="Cash on delivery",
+        created_by=actor_user_id,
+    )
+    session.add(record)
+    order.status = "confirmed"
+    session.flush()
+    return record
+
+
+def collect_cash_on_delivery(session: Session, *, order: SalesOrder) -> PaymentRecord | None:
+    """Settle the pending COD record when the shipment is delivered.
+
+    Revenue is recognised at that point (invoice issued + posted), matching the
+    prepaid flow. Idempotent: a second delivery callback finds no pending row.
+    """
+    pending = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.order_id == order.id,
+            PaymentRecord.provider == "cash",
+            PaymentRecord.direction == "receipt",
+            PaymentRecord.status == "pending",
+        )
+    )
+    if pending is None:
+        return None
+    pending.status = "succeeded"
+    pending.occurred_at = datetime.now(timezone.utc)
+    order.payment_state = "paid"
+    session.flush()
+    if order.invoice_id is None:
+        _issue_invoice_for_paid_order(session, order, pending.created_by)
+    return pending
+
+
+def confirm_external_payment(
+    session: Session, *, company_id: str, actor_user_id: str | None, order_id: str,
+    provider: str, provider_ref: str, method: str,
+    existing_payment: PaymentRecord | None = None,
+) -> tuple[SalesOrder, PaymentRecord | None]:
+    """Mark an order paid after a provider (Razorpay) captured the money.
+
+    The charge happened in the browser, so there is no adapter call here — the
+    caller must have verified the provider signature first. Safe to call twice:
+    the verified callback and a webhook can both arrive.
+    """
+    order = session.get(SalesOrder, order_id)
+    if order is None or order.company_id != company_id:
+        raise NotFoundError("Sales order")
+    existing = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.provider == provider, PaymentRecord.provider_ref == provider_ref
+        )
+    )
+    if order.payment_state == "paid":
+        return order, existing
+    if order.status != "pending_payment":
+        raise BusinessRuleError(
+            "ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be paid"
+        )
+    if existing_payment is not None:
+        # Promote the pending gateway intent to the captured payment instead of
+        # booking a second row for the same money.
+        existing_payment.provider_ref = provider_ref
+        existing_payment.status = "succeeded"
+        existing_payment.method = method
+        existing_payment.occurred_at = datetime.now(timezone.utc)
+        existing_payment.notes = f"{provider} payment {provider_ref}"
+        session.flush()
+        payment = existing_payment
+    else:
+        payment = payments.record_captured_payment(
+            session,
+            company_id=company_id,
+            actor_user_id=actor_user_id,
+            customer_id=order.customer_id,
+            order_id=order.id,
+            amount=order.total,
+            currency=order.currency,
+            method=method,
+            provider=provider,
+            provider_ref=provider_ref,
+            notes=f"{provider} payment {provider_ref}",
+        )
+    order.payment_state = "paid"
+    order.status = "paid"
+    session.flush()
+    _issue_invoice_for_paid_order(session, order, actor_user_id)
+    return order, payment
+
+
 def _issue_invoice_for_paid_order(session: Session, order: SalesOrder, actor_user_id: str | None) -> None:
     """Issue and post the invoice on payment confirmation."""
     company = _company(session, order.company_id)
@@ -388,6 +534,8 @@ def _issue_invoice_for_paid_order(session: Session, order: SalesOrder, actor_use
         shipping_total=dec(order.shipping_total),
         order_id=order.id,
         source="order",
+        # billing address snapshot: the printed GST invoice needs a buyer address
+        customer_address=order.billing_address or order.shipping_address,
     )
     invoicing.post_invoice(session, invoice, actor_user_id)
     order.invoice_id = invoice.id
@@ -440,9 +588,14 @@ def get_order_lines(session: Session, order_id: str) -> list[OrderLine]:
     )
 
 
-def cancel_order(session: Session, order: SalesOrder, actor_user_id: str | None) -> SalesOrder:
+def cancel_order(
+    session: Session,
+    order: SalesOrder,
+    actor_user_id: str | None,
+    cancel_reason: str | None = None,
+) -> SalesOrder:
     """Cancel unpaid orders — reservations are released; paid orders must be
-    refunded instead (returns module)."""
+    refunded instead (returns module). `cancel_reason` is shown to the shopper."""
     if order.status == "cancelled":
         raise BusinessRuleError("ALREADY_CANCELLED", "Order is already cancelled")
     if order.payment_state == "paid":
@@ -460,10 +613,55 @@ def cancel_order(session: Session, order: SalesOrder, actor_user_id: str | None)
                 actor_user_id=actor_user_id,
             )
             line.reserved_location_id = None
+    # A cash-on-delivery order was never collected: close its open receipt.
+    for pending in session.execute(
+        select(PaymentRecord).where(
+            PaymentRecord.order_id == order.id,
+            PaymentRecord.direction == "receipt",
+            PaymentRecord.status == "pending",
+        )
+    ).scalars():
+        pending.status = "voided"
+        session.flush()
     order.status = "cancelled"
     order.cancelled_at = datetime.now(timezone.utc)
+    order.cancel_reason = cancel_reason
     session.flush()
     return order
+
+
+def expire_unpaid_orders(
+    session: Session, *, company_id: str | None = None, timeout_minutes: int | None = None
+) -> int:
+    """Cancel gateway orders that were never paid, releasing their stock holds.
+
+    Only `pending_payment` orders are touched — COD orders sit in `confirmed`
+    and paid orders are left alone, so a run never disturbs a real sale. Open
+    payment intents are voided by `cancel_order`; replaying a sweep finds
+    nothing and returns 0.
+    """
+    from app.core.config import get_settings
+
+    minutes = (
+        get_settings().order_payment_timeout_minutes
+        if timeout_minutes is None
+        else timeout_minutes
+    )
+    if minutes <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    stmt = select(SalesOrder).where(
+        SalesOrder.status == "pending_payment",
+        SalesOrder.payment_state != "paid",
+        SalesOrder.created_at < cutoff,
+    )
+    if company_id is not None:
+        stmt = stmt.where(SalesOrder.company_id == company_id)
+    expired = 0
+    for order in session.execute(stmt).scalars().all():
+        cancel_order(session, order, None, cancel_reason="payment_timeout")
+        expired += 1
+    return expired
 
 
 def list_orders(session: Session, company_id: str, *, status: str | None = None, customer_id: str | None = None, limit: int = 200):

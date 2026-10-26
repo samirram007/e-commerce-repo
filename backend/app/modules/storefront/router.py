@@ -6,13 +6,14 @@ still requires a signed-in customer (existing /storefront/checkout).
 """
 from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import AuthError, BusinessRuleError
+from app.core.exceptions import AuthError, BusinessRuleError, NotFoundError
 from app.core.security import decode_token
 from app.db.unit_of_work import get_db
+from app.modules.catalog.models import Product
 from app.modules.identity.models import User
 from app.modules.storefront import service as svc
 
@@ -101,6 +102,27 @@ def product_detail(
     session: Session = Depends(get_db),
 ):
     return svc.product_detail(session, ctx.company_id, product_id, count_view=count_view)
+
+
+@router.get(
+    "/products/{product_id}/image",
+    responses={200: {"content": {"image/svg+xml": {}}}},
+)
+def product_image(product_id: str, session: Session = Depends(get_db)):
+    """Product tile for `<img>` tags, so it must stay public and header-free.
+
+    Resolves the product by id alone (company scoping would require a header a
+    browser cannot attach to an image request) and serves the deterministic
+    generated tile. A real uploaded photo can take precedence here later.
+    """
+    product = session.get(Product, product_id)
+    if product is None or not product.is_active:
+        raise NotFoundError("Product image")
+    return Response(
+        content=svc.placeholder_image_svg(session, product),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/trending")
@@ -368,4 +390,110 @@ def guest_pay_order(
         cart_token=token,
         order_id=order_id,
         method=payload.method,
+    )
+
+
+# ---- Razorpay hosted checkout ----
+@router.post("/orders/{order_id}/razorpay")
+def create_razorpay_order(
+    order_id: str,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Create (or reuse) the Razorpay order the browser opens Checkout with."""
+    return svc.create_razorpay_order(
+        session, company_id=ctx.company_id, cart_token=token, order_id=order_id
+    )
+
+
+class RazorpayVerifyIn(BaseModel):
+    razorpay_order_id: str = Field(min_length=1, max_length=64)
+    razorpay_payment_id: str = Field(min_length=1, max_length=64)
+    razorpay_signature: str = Field(min_length=1, max_length=256)
+
+
+@router.post("/orders/{order_id}/razorpay/verify")
+def verify_razorpay_payment(
+    order_id: str,
+    payload: RazorpayVerifyIn,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Verify the Checkout signature, then mark the order paid + invoice it."""
+    return svc.verify_razorpay_payment(
+        session,
+        company_id=ctx.company_id,
+        cart_token=token,
+        order_id=order_id,
+        razorpay_order_id=payload.razorpay_order_id,
+        razorpay_payment_id=payload.razorpay_payment_id,
+        razorpay_signature=payload.razorpay_signature,
+    )
+
+
+@router.post("/payments/razorpay/webhook")
+async def razorpay_webhook(
+    request: Request,
+    x_razorpay_signature: str | None = Header(default=None, alias="X-Razorpay-Signature"),
+    session: Session = Depends(get_db),
+):
+    """Razorpay webhook (no store headers): verified against the raw body."""
+    body = await request.body()
+    return svc.handle_razorpay_webhook(session, raw_body=body, signature=x_razorpay_signature)
+
+
+# ---- cancellation & returns ----
+@router.post("/orders/{order_id}/cancel")
+def guest_cancel_order(
+    order_id: str,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Cancel an order: release stock (unpaid) or refund the captured payment."""
+    return svc.guest_cancel_order(
+        session, company_id=ctx.company_id, cart_token=token, order_id=order_id
+    )
+
+
+class ReturnLineIn(BaseModel):
+    product_id: str
+    qty: Decimal = Field(gt=0)
+
+
+class ReturnIn(BaseModel):
+    lines: list[ReturnLineIn]
+    notes: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/orders/{order_id}/returns")
+def guest_order_returns(
+    order_id: str,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    return svc.guest_order_returns(
+        session, company_id=ctx.company_id, cart_token=token, order_id=order_id
+    )
+
+
+@router.post("/orders/{order_id}/returns", status_code=201)
+def guest_request_return(
+    order_id: str,
+    payload: ReturnIn,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Request a return for a delivered order (ERP approves and completes it)."""
+    return svc.guest_request_return(
+        session,
+        company_id=ctx.company_id,
+        cart_token=token,
+        order_id=order_id,
+        lines=[line.model_dump() for line in payload.lines],
+        notes=payload.notes,
     )

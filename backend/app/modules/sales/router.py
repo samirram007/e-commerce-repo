@@ -237,7 +237,7 @@ def get_order(order_id: str, ctx: CompanyCtx = Depends(guard(P_SALES_VIEW)), ses
 @router.post("/orders/{order_id}/cancel")
 def cancel_order(order_id: str, ctx: CompanyCtx = Depends(guard(P_SALES_VIEW)), session: Session = Depends(get_db)):
     order = svc.get_order(session, ctx.company_id, order_id)
-    svc.cancel_order(session, order, ctx.user.id)
+    svc.cancel_order(session, order, ctx.user.id, cancel_reason="cancelled_by_staff")
     log_action(session, action="order.cancelled", entity_type="sales_order", entity_id=order.id, actor_user_id=ctx.user.id, company_id=ctx.company_id)
     return {"id": order.id, "status": order.status}
 
@@ -249,6 +249,7 @@ def _order_brief(order: SalesOrder) -> dict:
         "customer_id": order.customer_id,
         "status": order.status,
         "payment_state": order.payment_state,
+        "cancel_reason": order.cancel_reason,
         "order_date": str(order.order_date),
         "currency": order.currency,
         "subtotal": str(order.subtotal),

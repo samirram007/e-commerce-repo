@@ -29,6 +29,9 @@ export interface CompanyOut extends CompanySummary {
   legal_name: string;
   timezone: string;
   locale: string;
+  /** Registered address + GSTIN, printed on tax invoices. */
+  address?: string | null;
+  tax_identifier?: string | null;
 }
 
 export async function login(email: string, password: string): Promise<string> {
@@ -72,5 +75,11 @@ export async function createCompany(input: {
 
 export async function listAllCompanies(): Promise<CompanyOut[]> {
   const { data } = await api.get<CompanyOut[]>("/companies/all");
+  return data;
+}
+
+/** One company's profile (address/GSTIN for invoice headers). */
+export async function getCompany(companyId: string): Promise<CompanyOut> {
+  const { data } = await api.get<CompanyOut>(`/companies/${companyId}`);
   return data;
 }

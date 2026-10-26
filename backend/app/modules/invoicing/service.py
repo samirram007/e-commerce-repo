@@ -52,6 +52,7 @@ def create_invoice(
     invoice_date: date, currency: str, lines: list[dict],
     shipping_total=Decimal("0"), notes: str | None = None, due_date: date | None = None,
     order_id: str | None = None, source: str = "manual",
+    customer_address: str | None = None,
 ) -> CustomerInvoice:
     """Create a draft invoice; totals are computed server-side from lines."""
     customer = partners.get_customer(session, company_id, customer_id)
@@ -68,6 +69,7 @@ def create_invoice(
         due_date=due_date or invoice_date + timedelta(days=int(customer.payment_term_days or 0)),
         currency=currency,
         customer_name=customer.name,
+        customer_address=customer_address or None,
         customer_tax_identifier=customer.tax_identifier,
         notes=notes,
         order_id=order_id,
@@ -107,6 +109,7 @@ def create_invoice(
                 invoice_id="pending",
                 product_id=product.id if product else None,
                 sku_snapshot=product.sku if product else line.get("sku_snapshot", ""),
+                hsn_sac_snapshot=product.hsn_sac if product else None,
                 description_snapshot=line.get("description") or (product.name if product else ""),
                 qty=money(qty, 4),
                 unit_price=money(unit_price, precision),
@@ -165,6 +168,28 @@ def post_invoice(
     invoice.total_base = total_base
 
     codes = accounting.account_code_map(session, company.id)
+    # Tax payable CR split into CGST and SGST (one account each) where the chart
+    # has them; the SGST leg takes the remainder so the entry always balances.
+    tax_lines: list[JournalLineSpec]
+    gst_codes = accounting.gst_payable_codes(session, company.id, codes)
+    if gst_codes is not None and tax_base > 0:
+        invoice_lines = get_invoice_lines(session, invoice.id)
+        # rounded per GST slab so the ledger matches the printed CGST/SGST
+        cgst_base = money(
+            taxes.cgst_share(
+                [(line.tax_percentage, line.tax_amount) for line in invoice_lines]
+            )
+            * rate,
+            precision,
+        )
+        tax_lines = [
+            JournalLineSpec(account_code=gst_codes[0], side="credit", amount_base=cgst_base, party_ref=invoice.customer_id, description="CGST"),
+            JournalLineSpec(account_code=gst_codes[1], side="credit", amount_base=money(tax_base - cgst_base, precision), party_ref=invoice.customer_id, description="SGST"),
+        ]
+    else:
+        tax_lines = [
+            JournalLineSpec(account_code=codes["sales_tax_payable"], side="credit", amount_base=tax_base, party_ref=invoice.customer_id),
+        ]
     lines = [
         JournalLineSpec(
             account_code=codes["ar"],
@@ -174,7 +199,7 @@ def post_invoice(
             description=f"Invoice {invoice.doc_number}",
         ),
         # tax payable CR; revenue CR net of shipping
-        JournalLineSpec(account_code=codes["sales_tax_payable"], side="credit", amount_base=tax_base, party_ref=invoice.customer_id),
+        *tax_lines,
         JournalLineSpec(account_code=codes["sales_revenue"], side="credit", amount_base=revenue_base, party_ref=invoice.customer_id),
     ]
     entry = accounting.post_journal_entry(
@@ -267,14 +292,39 @@ def create_credit_note(
     company = _company(session, company_id)
     codes = accounting.account_code_map(session, company_id)
     ar_reduction_base = money(dec(total) * dec(invoice.exchange_rate), precision)
+    tax_reduction_base = money(dec(tax_total) * dec(invoice.exchange_rate), precision)
+    # Revenue is reversed net of tax; the tax portion goes back to tax payable.
+    # (Debiting the gross amount *and* the tax would unbalance the entry.)
+    revenue_reduction_base = money(ar_reduction_base - tax_reduction_base, precision)
+    tax_debit_lines: list[JournalLineSpec]
+    gst_codes = accounting.gst_payable_codes(session, company_id, codes)
+    if gst_codes is not None and tax_reduction_base > 0:
+        cgst_base = money(
+            taxes.cgst_share(
+                [
+                    (original.tax_percentage if original else Decimal("0"), tax_amount)
+                    for original, _qty, _price, tax_amount, _description in validated
+                ]
+            )
+            * dec(invoice.exchange_rate),
+            precision,
+        )
+        tax_debit_lines = [
+            JournalLineSpec(account_code=gst_codes[0], side="debit", amount_base=cgst_base, party_ref=invoice.customer_id, description="CGST reversed"),
+            JournalLineSpec(account_code=gst_codes[1], side="debit", amount_base=money(tax_reduction_base - cgst_base, precision), party_ref=invoice.customer_id, description="SGST reversed"),
+        ]
+    else:
+        tax_debit_lines = [
+            JournalLineSpec(account_code=codes["sales_tax_payable"], side="debit", amount_base=tax_reduction_base, party_ref=invoice.customer_id),
+        ]
     entry = accounting.post_journal_entry(
         session,
         company_id=company_id,
         entry_date=note_date,
         source=SourceRef(type="credit_note", id=credit.id),
         lines=[
-            JournalLineSpec(account_code=codes["sales_revenue"], side="debit", amount_base=ar_reduction_base, party_ref=invoice.customer_id, description=f"Credit note {doc_number}"),
-            JournalLineSpec(account_code=codes["sales_tax_payable"], side="debit", amount_base=money(dec(tax_total) * dec(invoice.exchange_rate), precision), party_ref=invoice.customer_id),
+            JournalLineSpec(account_code=codes["sales_revenue"], side="debit", amount_base=revenue_reduction_base, party_ref=invoice.customer_id, description=f"Credit note {doc_number}"),
+            *tax_debit_lines,
             JournalLineSpec(account_code=codes["ar"], side="credit", amount_base=ar_reduction_base, party_ref=invoice.customer_id, description=f"Credit note {doc_number}"),
         ],
         description=f"Credit note {doc_number} for invoice {invoice.doc_number}",

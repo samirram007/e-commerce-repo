@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Button, Card, ErrorBanner, Field, Input, PageHeader } from "../../components/ui";
 import { fieldErrors } from "../../lib/zod-utils";
+import { safeRedirect } from "../../lib/redirect";
 import { useAuth } from "../../auth/auth-context";
 import { bootstrapFormSchema, loginFormSchema } from "./schemas";
 
@@ -10,6 +11,7 @@ type Mode = "login" | "bootstrap";
 export function LoginPage() {
   const navigate = useNavigate();
   const { login, bootstrap } = useAuth();
+  const { redirect } = useSearch({ from: "/_guest/login" });
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -44,7 +46,7 @@ export function LoginPage() {
         return;
       }
       setPending(false);
-      navigate({ to: "/" });
+      navigate({ href: safeRedirect(redirect) });
       return;
     }
 
@@ -63,7 +65,7 @@ export function LoginPage() {
       return;
     }
     setPending(false);
-    navigate({ to: "/" });
+    navigate({ href: safeRedirect(redirect) });
   }
 
   return (

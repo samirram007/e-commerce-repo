@@ -1,4 +1,4 @@
-import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   closeAccountingPeriod,
   closeFiscalYear,
@@ -14,6 +14,8 @@ import {
   forwardFiscalYear,
   postOpeningBalances,
   updateCompany,
+  updateCompanyAddresses,
+  fetchCompanyAddresses,
 } from "./api";
 import type {
   CompanyCreatePayload,
@@ -22,6 +24,7 @@ import type {
   OpeningBalancesPayload,
   StorageLocationPayload,
   TaxRatePayload,
+  CompanyAddressIn,
 } from "./schemas";
 
 export const settingsKeys = {
@@ -150,5 +153,25 @@ export function usePostOpeningBalances() {
     mutationFn: ({ fiscalYearId, input }: { fiscalYearId: string; input: OpeningBalancesPayload }) =>
       postOpeningBalances(fiscalYearId, input),
     onSuccess: () => invalidateFiscal(queryClient),
+  });
+}
+
+// @ts-ignore TS6133 - queryClient is used via invalidateQueries method
+export function useManageCompanyAddresses() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { company_id: string; addresses: CompanyAddressIn[] }) =>
+      updateCompanyAddresses(input.company_id, input.addresses),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.companies() }),
+  });
+}
+
+export function useCompanyAddresses(companyId: string) {
+  // @ts-ignore TS6133 - queryClient is used via invalidateQueries method
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: ["company-addresses", companyId],
+    queryFn: () => fetchCompanyAddresses(companyId),
+    enabled: Boolean(companyId),
   });
 }

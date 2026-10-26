@@ -38,6 +38,7 @@ const EMPTY_FORM: ProductFormInput = {
   category_id: null,
   uom_id: null,
   barcode: "",
+  hsn_sac: "",
   stock_type: "stock",
   track_batches: false,
   track_serials: false,
@@ -56,6 +57,7 @@ function formFromProduct(product: Product): ProductFormInput {
     category_id: product.category_id,
     uom_id: product.uom_id,
     barcode: product.barcode ?? "",
+    hsn_sac: product.hsn_sac ?? "",
     stock_type: product.stock_type as ProductFormInput["stock_type"],
     track_batches: product.track_batches,
     track_serials: product.track_serials,
@@ -341,6 +343,16 @@ export function ProductsPage() {
           <Input
             value={form.description ?? ""}
             onChange={(event) => setField("description", event.target.value)}
+          />
+        </Field>
+        <Field
+          label="HSN / SAC"
+          error={errors.hsn_sac}
+          hint="Printed on GST invoices — 4 to 8 digits."
+        >
+          <Input
+            value={form.hsn_sac ?? ""}
+            onChange={(event) => setField("hsn_sac", event.target.value)}
           />
         </Field>
         <div className="grid-2">

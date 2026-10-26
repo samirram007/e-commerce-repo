@@ -5,6 +5,7 @@ import {
   fetchCart,
   fetchCategories,
   fetchInterests,
+  fetchOrderReturns,
   fetchOrders,
   fetchPaymentMethods,
   fetchPincode,
@@ -24,6 +25,7 @@ export const shopKeys = {
   cart: ["shop", "cart"] as const,
   addresses: ["shop", "addresses"] as const,
   orders: ["shop", "orders"] as const,
+  orderReturns: (orderId: string) => ["shop", "order-returns", orderId] as const,
   pincode: (pincode: string) => ["shop", "pincode", pincode] as const,
   paymentMethods: (pincode?: string) => ["shop", "payment-methods", pincode ?? ""] as const,
 };
@@ -63,11 +65,24 @@ export function ordersQueryOptions() {
   return queryOptions({ queryKey: shopKeys.orders, queryFn: fetchOrders });
 }
 
-export function pincodeQueryOptions(pincode: string) {
+export function orderReturnsQueryOptions(orderId: string) {
   return queryOptions({
-    queryKey: shopKeys.pincode(pincode),
-    queryFn: () => fetchPincode(pincode),
-    enabled: pincode.trim().length >= 4,
+    queryKey: shopKeys.orderReturns(orderId),
+    queryFn: () => fetchOrderReturns(orderId),
+  });
+}
+
+/** Indian PIN codes are exactly six digits (and never start with 0). */
+export function isValidPincode(pincode: string): boolean {
+  return /^[1-9]\d{5}$/.test(pincode.trim());
+}
+
+export function pincodeQueryOptions(pincode: string) {
+  const normalized = pincode.trim();
+  return queryOptions({
+    queryKey: shopKeys.pincode(normalized),
+    queryFn: () => fetchPincode(normalized),
+    enabled: isValidPincode(normalized),
     staleTime: 5 * 60_000,
   });
 }

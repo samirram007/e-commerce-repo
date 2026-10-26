@@ -48,6 +48,8 @@ class ProductIn(BaseModel):
     category_id: str | None = None
     uom_id: str | None = None
     barcode: str | None = Field(default=None, max_length=64)
+    # HSN (goods) / SAC (services) code printed on GST invoices
+    hsn_sac: str | None = Field(default=None, max_length=12)
     stock_type: str = "stock"
     track_batches: bool = False
     track_serials: bool = False
@@ -65,6 +67,7 @@ class ProductUpdateIn(BaseModel):
     category_id: str | None = None
     uom_id: str | None = None
     barcode: str | None = None
+    hsn_sac: str | None = None
     stock_type: str | None = None
     track_batches: bool | None = None
     track_serials: bool | None = None
@@ -86,6 +89,7 @@ class ProductOut(BaseModel):
     category_id: str | None
     uom_id: str | None
     barcode: str | None
+    hsn_sac: str | None
     stock_type: str
     track_batches: bool
     track_serials: bool

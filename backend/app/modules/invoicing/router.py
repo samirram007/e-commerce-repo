@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.permissions import P_INVOICES_MANAGE, P_INVOICES_VIEW
@@ -13,7 +13,8 @@ from app.db.unit_of_work import get_db
 from app.modules.audit.service import log_action
 from app.modules.identity.dependencies import CompanyCtx, guard
 from app.modules.invoicing import service as svc
-from app.modules.invoicing.models import CreditNote, CustomerInvoice
+from app.modules.invoicing.models import CreditNote, CustomerInvoice, InvoiceLine
+from app.shared.money import dec, money
 
 router = APIRouter(prefix="/invoices")
 
@@ -31,6 +32,8 @@ class InvoiceLineIn(BaseModel):
 class InvoiceCreateIn(BaseModel):
     customer_id: str
     invoice_date: date
+    # buyer address snapshot for the printed GST invoice
+    customer_address: str | None = None
     currency: str = Field(default="INR", min_length=3, max_length=3)
     shipping_total: Decimal = Decimal("0")
     due_date: date | None = None
@@ -44,6 +47,7 @@ class InvoiceLineOut(BaseModel):
     id: str
     product_id: str | None
     sku_snapshot: str
+    hsn_sac: str | None
     description_snapshot: str
     qty: Decimal
     unit_price: Decimal
@@ -53,11 +57,25 @@ class InvoiceLineOut(BaseModel):
     tax_amount: Decimal
 
 
+class TaxBreakupOut(BaseModel):
+    """Tax charged at one GST rate; the UI shows CGST/SGST halves in the label.
+
+    `taxable` is the value the rate applies to, so a printable invoice can show
+    the taxable value and the CGST/SGST split per slab.
+    """
+
+    rate: Decimal
+    taxable: Decimal
+    amount: Decimal
+
+
 class InvoiceOut(BaseModel):
     id: str
     doc_number: str
     customer_id: str
     customer_name: str
+    customer_address: str | None
+    customer_tax_identifier: str | None
     status: str
     invoice_date: date
     due_date: date | None
@@ -69,6 +87,7 @@ class InvoiceOut(BaseModel):
     total: Decimal
     total_base: Decimal
     order_id: str | None
+    tax_breakup: list[TaxBreakupOut] = Field(default_factory=list)
 
 
 class CreditNoteIn(BaseModel):
@@ -88,12 +107,45 @@ class CreditLineIn(BaseModel):
     tax_amount: Decimal | None = None
 
 
-def _invoice_out(invoice: CustomerInvoice) -> InvoiceOut:
+def _breakup_map(session: Session, invoice_ids: list[str]) -> dict[str, list[TaxBreakupOut]]:
+    """Tax per GST rate for each invoice, in one grouped query (no N+1)."""
+    if not invoice_ids:
+        return {}
+    rows = session.execute(
+        select(
+            InvoiceLine.invoice_id,
+            InvoiceLine.tax_percentage,
+            func.sum(InvoiceLine.tax_amount),
+            func.sum(InvoiceLine.qty * InvoiceLine.unit_price - InvoiceLine.discount),
+        )
+        .where(InvoiceLine.invoice_id.in_(invoice_ids))
+        .group_by(InvoiceLine.invoice_id, InvoiceLine.tax_percentage)
+    ).all()
+    out: dict[str, list[TaxBreakupOut]] = {}
+    for invoice_id, rate, amount, taxable in rows:
+        # zero-rated (exempt) lines contribute nothing to the tax total
+        if dec(rate) <= 0:
+            continue
+        out.setdefault(invoice_id, []).append(
+            TaxBreakupOut(
+                rate=dec(rate),
+                taxable=money(dec(taxable), 2),
+                amount=money(dec(amount), 2),
+            )
+        )
+    for values in out.values():
+        values.sort(key=lambda row: row.rate)
+    return out
+
+
+def _invoice_out(invoice: CustomerInvoice, breakup: list[TaxBreakupOut] | None = None) -> InvoiceOut:
     return InvoiceOut(
         id=invoice.id,
         doc_number=invoice.doc_number,
         customer_id=invoice.customer_id,
         customer_name=invoice.customer_name,
+        customer_address=invoice.customer_address,
+        customer_tax_identifier=invoice.customer_tax_identifier,
         status=invoice.status,
         invoice_date=invoice.invoice_date,
         due_date=invoice.due_date,
@@ -105,6 +157,7 @@ def _invoice_out(invoice: CustomerInvoice) -> InvoiceOut:
         total=invoice.total,
         total_base=invoice.total_base,
         order_id=invoice.order_id,
+        tax_breakup=breakup or [],
     )
 
 
@@ -120,12 +173,18 @@ def list_invoices(
         stmt = stmt.where(CustomerInvoice.status == status)
     if customer_id:
         stmt = stmt.where(CustomerInvoice.customer_id == customer_id)
-    return [_invoice_out(i) for i in session.execute(stmt).scalars().all()]
+    invoices = session.execute(stmt).scalars().all()
+    breakup = _breakup_map(session, [i.id for i in invoices])
+    return [_invoice_out(i, breakup.get(i.id, [])) for i in invoices]
+
+
+def _invoice_detail(session: Session, invoice: CustomerInvoice) -> InvoiceOut:
+    return _invoice_out(invoice, _breakup_map(session, [invoice.id]).get(invoice.id, []))
 
 
 @router.get("/{invoice_id}", response_model=InvoiceOut)
 def get_invoice(invoice_id: str, ctx: CompanyCtx = Depends(guard(P_INVOICES_VIEW)), session: Session = Depends(get_db)):
-    return _invoice_out(svc.get_invoice(session, ctx.company_id, invoice_id))
+    return _invoice_detail(session, svc.get_invoice(session, ctx.company_id, invoice_id))
 
 
 @router.get("/{invoice_id}/lines", response_model=list[InvoiceLineOut])
@@ -135,6 +194,7 @@ def invoice_lines(invoice_id: str, ctx: CompanyCtx = Depends(guard(P_INVOICES_VI
     return [
         InvoiceLineOut(
             id=l.id, product_id=l.product_id, sku_snapshot=l.sku_snapshot,
+            hsn_sac=l.hsn_sac_snapshot,
             description_snapshot=l.description_snapshot, qty=l.qty, unit_price=l.unit_price,
             discount=l.discount, tax_percentage=l.tax_percentage, line_total=l.line_total,
             tax_amount=l.tax_amount,
@@ -151,6 +211,7 @@ def create_invoice(payload: InvoiceCreateIn, ctx: CompanyCtx = Depends(guard(P_I
         actor_user_id=ctx.user.id,
         customer_id=payload.customer_id,
         invoice_date=payload.invoice_date,
+        customer_address=payload.customer_address,
         currency=payload.currency,
         lines=[l.model_dump() for l in payload.lines],
         shipping_total=payload.shipping_total,
@@ -164,7 +225,7 @@ def create_invoice(payload: InvoiceCreateIn, ctx: CompanyCtx = Depends(guard(P_I
         log_action(session, action="invoice.posted", entity_type="customer_invoice", entity_id=invoice.id, actor_user_id=ctx.user.id, company_id=ctx.company_id, after_data={"doc_number": invoice.doc_number, "total": str(invoice.total)})
     else:
         log_action(session, action="invoice.created", entity_type="customer_invoice", entity_id=invoice.id, actor_user_id=ctx.user.id, company_id=ctx.company_id)
-    return _invoice_out(invoice)
+    return _invoice_detail(session, invoice)
 
 
 @router.post("/{invoice_id}/post", response_model=InvoiceOut)
@@ -172,7 +233,7 @@ def post_invoice(invoice_id: str, ctx: CompanyCtx = Depends(guard(P_INVOICES_MAN
     invoice = svc.get_invoice(session, ctx.company_id, invoice_id)
     invoice, _ = svc.post_invoice(session, invoice, ctx.user.id)
     log_action(session, action="invoice.posted", entity_type="customer_invoice", entity_id=invoice.id, actor_user_id=ctx.user.id, company_id=ctx.company_id)
-    return _invoice_out(invoice)
+    return _invoice_detail(session, invoice)
 
 
 @router.post("/{invoice_id}/reverse", response_model=InvoiceOut)
@@ -180,7 +241,7 @@ def reverse_invoice(invoice_id: str, ctx: CompanyCtx = Depends(guard(P_INVOICES_
     invoice = svc.get_invoice(session, ctx.company_id, invoice_id)
     svc.reverse_invoice(session, invoice, ctx.user.id)
     log_action(session, action="invoice.reversed", entity_type="customer_invoice", entity_id=invoice.id, actor_user_id=ctx.user.id, company_id=ctx.company_id)
-    return _invoice_out(invoice)
+    return _invoice_detail(session, invoice)
 
 
 class CreditNoteOut(BaseModel):

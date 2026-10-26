@@ -66,9 +66,26 @@ class Settings(BaseSettings):
 
     cookie_secure: bool | None = None  # None → secure when APP_ENV=prod
 
+    # ---- storefront order expiry (abandoned gateway checkouts) ----
+    # unpaid orders older than this are cancelled and their stock released
+    order_payment_timeout_minutes: int = 30
+    # how often the background sweeper runs; <= 0 disables it
+    order_expiry_sweep_seconds: int = 300
+
+    # ---- Razorpay (online payments for the storefront) ----
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    razorpay_timeout_seconds: int = 15
+
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
+
+    @property
+    def razorpay_configured(self) -> bool:
+        """True when both API keys are present, so checkout can be offered."""
+        return bool(self.razorpay_key_id.strip() and self.razorpay_key_secret.strip())
 
     @model_validator(mode="after")
     def production_secret_guard(self) -> "Settings":

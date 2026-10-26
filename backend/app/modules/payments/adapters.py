@@ -59,7 +59,71 @@ class MockGatewayAdapter:
         return ProviderChargeResult(self.name, f"refund_{provider_ref}", True)
 
 
-_ADAPTERS: dict[str, object] = {"mock": MockGatewayAdapter()}
+class CashAdapter:
+    """Cash on delivery: no external call, money is collected by the courier.
+
+    A pending cash record is opened at checkout and settled on delivery; refunds
+    are recorded as cash-out so accounting stays complete.
+    """
+
+    name = "cash"
+
+    def charge(
+        self, *, amount: Decimal, currency: str, customer_ref: str | None, idempotency_key: str
+    ) -> ProviderChargeResult:
+        import hashlib
+
+        digest = hashlib.sha256(f"cash|{idempotency_key}|{amount}".encode()).hexdigest()[:16]
+        return ProviderChargeResult(self.name, f"cash_{digest}", True)
+
+    def refund(
+        self, *, provider_ref: str, amount: Decimal, currency: str, idempotency_key: str
+    ) -> ProviderChargeResult:
+        import hashlib
+
+        digest = hashlib.sha256(f"cash-refund|{provider_ref}|{amount}|{idempotency_key}".encode()).hexdigest()[:16]
+        return ProviderChargeResult(self.name, f"cash_refund_{digest}", True)
+
+
+class RazorpayAdapter:
+    """Razorpay refunds. Charges happen in Razorpay Checkout (browser), so the
+    captured payment is recorded from the verified signature instead."""
+
+    name = "razorpay"
+
+    def charge(
+        self, *, amount: Decimal, currency: str, customer_ref: str | None, idempotency_key: str
+    ) -> ProviderChargeResult:
+        return ProviderChargeResult(
+            self.name,
+            "",
+            False,
+            "USE_HOSTED_CHECKOUT",
+            "Razorpay charges are captured by Razorpay Checkout and confirmed via signature",
+        )
+
+    def refund(
+        self, *, provider_ref: str, amount: Decimal, currency: str, idempotency_key: str
+    ) -> ProviderChargeResult:
+        from app.core.exceptions import AppError
+        from app.modules.payments import razorpay
+
+        try:
+            result = razorpay.refund(
+                provider_ref,
+                amount_paise=razorpay.amount_to_paise(amount),
+                notes={"idempotency_key": idempotency_key},
+            )
+        except AppError as exc:
+            return ProviderChargeResult(self.name, "", False, exc.code, exc.message)
+        return ProviderChargeResult(self.name, result.get("id", ""), True)
+
+
+_ADAPTERS: dict[str, object] = {
+    "mock": MockGatewayAdapter(),
+    "razorpay": RazorpayAdapter(),
+    "cash": CashAdapter(),
+}
 
 
 def get_adapter(name: str = "mock") -> object:

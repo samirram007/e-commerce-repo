@@ -54,6 +54,8 @@ class Product(Base, TimestampMixin, CreatedByMixin):
     category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("categories.id"), nullable=True)
     uom_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("units_of_measure.id"), nullable=True)
     barcode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # HSN (goods) or SAC (services) code printed on GST invoices
+    hsn_sac: Mapped[str | None] = mapped_column(String(12), nullable=True)
     # stock_type: stock | service | non_inventory
     stock_type: Mapped[str] = mapped_column(String(16), nullable=False, default="stock")
     track_batches: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

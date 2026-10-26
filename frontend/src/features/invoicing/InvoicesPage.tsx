@@ -16,8 +16,10 @@ import {
   type Column,
 } from "../../components/ui";
 import { Sheet, SheetSelect } from "../../components/sheet";
+import { useAuth } from "../../auth/auth-context";
 import { usePermissions } from "../../hooks/use-permissions";
-import { formatDate, formatMoney, formatQty } from "../../lib/format";
+import { InvoicePrint } from "./InvoicePrint";
+import { formatDate, formatMoney, formatQty, gstLabel } from "../../lib/format";
 import { fieldErrors } from "../../lib/zod-utils";
 import { productsQueryOptions } from "../catalog/queries";
 import {
@@ -36,6 +38,7 @@ import {
   arAgingQueryOptions,
   creditNotesQueryOptions,
   customersQueryOptions,
+  invoiceCompanyQueryOptions,
   invoiceLinesQueryOptions,
   invoicesQueryOptions,
   locationsQueryOptions,
@@ -62,6 +65,7 @@ function emptyInvoiceForm(): InvoiceFormInput {
   return {
     customer_id: "",
     invoice_date: today(),
+    customer_address: "",
     currency: "INR",
     shipping_total: "0",
     due_date: "",
@@ -113,6 +117,9 @@ export function InvoicesPage() {
   const creditNotes = useQuery(creditNotesQueryOptions());
   const aging = useQuery(arAgingQueryOptions(asOf));
   const detailLines = useQuery(invoiceLinesQueryOptions(detail?.id ?? ""));
+  const { companyId } = useAuth();
+  const company = useQuery(invoiceCompanyQueryOptions(companyId));
+  const [printOpen, setPrintOpen] = useState(false);
   const creditSourceLines = useQuery(invoiceLinesQueryOptions(creditForm.invoice_id));
 
   const createInvoice = useCreateInvoice();
@@ -475,6 +482,14 @@ export function InvoicesPage() {
             />
           </Field>
         </div>
+        <Field label="Billing address (printed on the invoice)" error={errors.customer_address}>
+          <Textarea
+            rows={2}
+            value={form.customer_address ?? ""}
+            onChange={(event) => setField("customer_address", event.target.value)}
+            placeholder="Street, city, state, PIN"
+          />
+        </Field>
         <Field label="Notes" error={errors.notes}>
           <Textarea
             rows={2}
@@ -556,6 +571,11 @@ export function InvoicesPage() {
       >
         {detail ? (
           <div style={{ padding: 18 }}>
+            <div className="invoice-print-actions">
+              <Button variant="secondary" onClick={() => setPrintOpen(true)}>
+                Print / GST invoice
+              </Button>
+            </div>
             <div className="grid-2">
               <div>
                 <div className="muted">Customer</div>
@@ -581,7 +601,16 @@ export function InvoicesPage() {
               </div>
               <div>
                 <div className="muted">Tax</div>
-                <div>{formatMoney(detail.tax_total, detail.currency)}</div>
+                {detail.tax_breakup.length > 0 ? (
+                  detail.tax_breakup.map((row) => (
+                    <div key={row.rate}>
+                      <div>{formatMoney(row.amount, detail.currency)}</div>
+                      <div className="muted">{gstLabel(row.rate)}</div>
+                    </div>
+                  ))
+                ) : (
+                  <div>{formatMoney(detail.tax_total, detail.currency)}</div>
+                )}
               </div>
               <div>
                 <div className="muted">Shipping</div>
@@ -608,6 +637,29 @@ export function InvoicesPage() {
           </div>
         ) : null}
       </Sheet>
+
+      <Modal
+        open={printOpen && detail !== null}
+        title={detail ? `Tax invoice ${detail.doc_number}` : "Tax invoice"}
+        onClose={() => setPrintOpen(false)}
+        wide
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPrintOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={() => window.print()}>Print</Button>
+          </>
+        }
+      >
+        {detail ? (
+          <InvoicePrint
+            invoice={detail}
+            lines={detailLines.data ?? []}
+            company={company.data ?? null}
+          />
+        ) : null}
+      </Modal>
 
       <Modal
         open={creditOpen}

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as GuestRouteImport } from './routes/_guest'
 import { Route as ProtectedRouteImport } from './routes/_protected'
+import { Route as ShopRouteImport } from './routes/shop'
 import { Route as GuestLoginRouteImport } from './routes/_guest/login'
 import { Route as ProtectedIndexRouteImport } from './routes/_protected/index'
 import { Route as ProtectedAccountingRouteImport } from './routes/_protected/accounting'
@@ -31,6 +32,14 @@ import { Route as ProtectedSettingsRouteImport } from './routes/_protected/setti
 import { Route as ProtectedSetupRouteImport } from './routes/_protected/setup'
 import { Route as ProtectedShipmentsRouteImport } from './routes/_protected/shipments'
 import { Route as ProtectedUsersRouteImport } from './routes/_protected/users'
+import { Route as ShopIndexRouteImport } from './routes/shop/index'
+import { Route as ShopCartRouteImport } from './routes/shop/cart'
+import { Route as ShopCheckoutRouteImport } from './routes/shop/checkout'
+import { Route as ShopInterestsRouteImport } from './routes/shop/interests'
+import { Route as ShopOrdersRouteImport } from './routes/shop/orders'
+import { Route as ShopProductsRouteImport } from './routes/shop/products'
+import { Route as ShopProductsIndexRouteImport } from './routes/shop/products/index'
+import { Route as ShopProductsProductIdRouteImport } from './routes/shop/products.$productId'
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
@@ -43,6 +52,11 @@ const GuestRoute = GuestRouteImport.update({
 } as any)
 const ProtectedRoute = ProtectedRouteImport.update({
   id: '/_protected',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShopRoute = ShopRouteImport.update({
+  id: '/shop',
+  path: '/shop',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GuestLoginRoute = GuestLoginRouteImport.update({
@@ -140,10 +154,51 @@ const ProtectedUsersRoute = ProtectedUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ShopIndexRoute = ShopIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopCartRoute = ShopCartRouteImport.update({
+  id: '/cart',
+  path: '/cart',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopCheckoutRoute = ShopCheckoutRouteImport.update({
+  id: '/checkout',
+  path: '/checkout',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopInterestsRoute = ShopInterestsRouteImport.update({
+  id: '/interests',
+  path: '/interests',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopOrdersRoute = ShopOrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopProductsRoute = ShopProductsRouteImport.update({
+  id: '/products',
+  path: '/products',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopProductsIndexRoute = ShopProductsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ShopProductsRoute,
+} as any)
+const ShopProductsProductIdRoute = ShopProductsProductIdRouteImport.update({
+  id: '/$productId',
+  path: '/$productId',
+  getParentRoute: () => ShopProductsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/$': typeof SplatRoute
   '/': typeof ProtectedIndexRoute
+  '/shop': typeof ShopRouteWithChildren
   '/login': typeof GuestLoginRoute
   '/accounting': typeof ProtectedAccountingRoute
   '/audit': typeof ProtectedAuditRoute
@@ -162,6 +217,14 @@ export interface FileRoutesByFullPath {
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
   '/users': typeof ProtectedUsersRoute
+  '/shop/cart': typeof ShopCartRoute
+  '/shop/checkout': typeof ShopCheckoutRoute
+  '/shop/interests': typeof ShopInterestsRoute
+  '/shop/orders': typeof ShopOrdersRoute
+  '/shop/products': typeof ShopProductsRouteWithChildren
+  '/shop/': typeof ShopIndexRoute
+  '/shop/products/$productId': typeof ShopProductsProductIdRoute
+  '/shop/products/': typeof ShopProductsIndexRoute
 }
 export interface FileRoutesByTo {
   '/$': typeof SplatRoute
@@ -184,12 +247,20 @@ export interface FileRoutesByTo {
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
   '/users': typeof ProtectedUsersRoute
+  '/shop/cart': typeof ShopCartRoute
+  '/shop/checkout': typeof ShopCheckoutRoute
+  '/shop/interests': typeof ShopInterestsRoute
+  '/shop/orders': typeof ShopOrdersRoute
+  '/shop': typeof ShopIndexRoute
+  '/shop/products/$productId': typeof ShopProductsProductIdRoute
+  '/shop/products': typeof ShopProductsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/$': typeof SplatRoute
   '/_guest': typeof GuestRouteWithChildren
   '/_protected': typeof ProtectedRouteWithChildren
+  '/shop': typeof ShopRouteWithChildren
   '/_guest/login': typeof GuestLoginRoute
   '/_protected/accounting': typeof ProtectedAccountingRoute
   '/_protected/audit': typeof ProtectedAuditRoute
@@ -208,13 +279,22 @@ export interface FileRoutesById {
   '/_protected/setup': typeof ProtectedSetupRoute
   '/_protected/shipments': typeof ProtectedShipmentsRoute
   '/_protected/users': typeof ProtectedUsersRoute
+  '/shop/cart': typeof ShopCartRoute
+  '/shop/checkout': typeof ShopCheckoutRoute
+  '/shop/interests': typeof ShopInterestsRoute
+  '/shop/orders': typeof ShopOrdersRoute
+  '/shop/products': typeof ShopProductsRouteWithChildren
   '/_protected/': typeof ProtectedIndexRoute
+  '/shop/': typeof ShopIndexRoute
+  '/shop/products/$productId': typeof ShopProductsProductIdRoute
+  '/shop/products/': typeof ShopProductsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/$'
     | '/'
+    | '/shop'
     | '/login'
     | '/accounting'
     | '/audit'
@@ -233,6 +313,14 @@ export interface FileRouteTypes {
     | '/setup'
     | '/shipments'
     | '/users'
+    | '/shop/cart'
+    | '/shop/checkout'
+    | '/shop/interests'
+    | '/shop/orders'
+    | '/shop/products'
+    | '/shop/'
+    | '/shop/products/$productId'
+    | '/shop/products/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/$'
@@ -255,11 +343,19 @@ export interface FileRouteTypes {
     | '/setup'
     | '/shipments'
     | '/users'
+    | '/shop/cart'
+    | '/shop/checkout'
+    | '/shop/interests'
+    | '/shop/orders'
+    | '/shop'
+    | '/shop/products/$productId'
+    | '/shop/products'
   id:
     | '__root__'
     | '/$'
     | '/_guest'
     | '/_protected'
+    | '/shop'
     | '/_guest/login'
     | '/_protected/accounting'
     | '/_protected/audit'
@@ -278,13 +374,22 @@ export interface FileRouteTypes {
     | '/_protected/setup'
     | '/_protected/shipments'
     | '/_protected/users'
+    | '/shop/cart'
+    | '/shop/checkout'
+    | '/shop/interests'
+    | '/shop/orders'
+    | '/shop/products'
     | '/_protected/'
+    | '/shop/'
+    | '/shop/products/$productId'
+    | '/shop/products/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   SplatRoute: typeof SplatRoute
   GuestRoute: typeof GuestRouteWithChildren
   ProtectedRoute: typeof ProtectedRouteWithChildren
+  ShopRoute: typeof ShopRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -308,6 +413,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof ProtectedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/shop': {
+      id: '/shop'
+      path: '/shop'
+      fullPath: '/shop'
+      preLoaderRoute: typeof ShopRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_guest/login': {
@@ -443,6 +555,62 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedUsersRouteImport
       parentRoute: typeof ProtectedRoute
     }
+    '/shop/': {
+      id: '/shop/'
+      path: '/'
+      fullPath: '/shop/'
+      preLoaderRoute: typeof ShopIndexRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/shop/cart': {
+      id: '/shop/cart'
+      path: '/cart'
+      fullPath: '/shop/cart'
+      preLoaderRoute: typeof ShopCartRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/shop/checkout': {
+      id: '/shop/checkout'
+      path: '/checkout'
+      fullPath: '/shop/checkout'
+      preLoaderRoute: typeof ShopCheckoutRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/shop/interests': {
+      id: '/shop/interests'
+      path: '/interests'
+      fullPath: '/shop/interests'
+      preLoaderRoute: typeof ShopInterestsRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/shop/orders': {
+      id: '/shop/orders'
+      path: '/orders'
+      fullPath: '/shop/orders'
+      preLoaderRoute: typeof ShopOrdersRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/shop/products': {
+      id: '/shop/products'
+      path: '/products'
+      fullPath: '/shop/products'
+      preLoaderRoute: typeof ShopProductsRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/shop/products/': {
+      id: '/shop/products/'
+      path: '/'
+      fullPath: '/shop/products/'
+      preLoaderRoute: typeof ShopProductsIndexRouteImport
+      parentRoute: typeof ShopProductsRoute
+    }
+    '/shop/products/$productId': {
+      id: '/shop/products/$productId'
+      path: '/$productId'
+      fullPath: '/shop/products/$productId'
+      preLoaderRoute: typeof ShopProductsProductIdRouteImport
+      parentRoute: typeof ShopProductsRoute
+    }
   }
 }
 
@@ -502,10 +670,45 @@ const ProtectedRouteWithChildren = ProtectedRoute._addFileChildren(
   ProtectedRouteChildren,
 )
 
+interface ShopProductsRouteChildren {
+  ShopProductsProductIdRoute: typeof ShopProductsProductIdRoute
+  ShopProductsIndexRoute: typeof ShopProductsIndexRoute
+}
+
+const ShopProductsRouteChildren: ShopProductsRouteChildren = {
+  ShopProductsProductIdRoute: ShopProductsProductIdRoute,
+  ShopProductsIndexRoute: ShopProductsIndexRoute,
+}
+
+const ShopProductsRouteWithChildren = ShopProductsRoute._addFileChildren(
+  ShopProductsRouteChildren,
+)
+
+interface ShopRouteChildren {
+  ShopCartRoute: typeof ShopCartRoute
+  ShopCheckoutRoute: typeof ShopCheckoutRoute
+  ShopInterestsRoute: typeof ShopInterestsRoute
+  ShopOrdersRoute: typeof ShopOrdersRoute
+  ShopProductsRoute: typeof ShopProductsRouteWithChildren
+  ShopIndexRoute: typeof ShopIndexRoute
+}
+
+const ShopRouteChildren: ShopRouteChildren = {
+  ShopCartRoute: ShopCartRoute,
+  ShopCheckoutRoute: ShopCheckoutRoute,
+  ShopInterestsRoute: ShopInterestsRoute,
+  ShopOrdersRoute: ShopOrdersRoute,
+  ShopProductsRoute: ShopProductsRouteWithChildren,
+  ShopIndexRoute: ShopIndexRoute,
+}
+
+const ShopRouteWithChildren = ShopRoute._addFileChildren(ShopRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   SplatRoute: SplatRoute,
   GuestRoute: GuestRouteWithChildren,
   ProtectedRoute: ProtectedRouteWithChildren,
+  ShopRoute: ShopRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

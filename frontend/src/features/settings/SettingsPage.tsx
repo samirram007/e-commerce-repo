@@ -84,6 +84,7 @@ const EMPTY_COMPANY_CREATE: CompanyCreateFormInput = {
   locale: "en-IN",
   address: "",
   tax_identifier: "",
+  storefront_slug: "",
 };
 
 const EMPTY_COMPANY_UPDATE: CompanyUpdateFormInput = {
@@ -96,6 +97,7 @@ const EMPTY_COMPANY_UPDATE: CompanyUpdateFormInput = {
   allow_negative_stock: false,
   allow_guest_checkout: false,
   is_active: true,
+  storefront_slug: "",
 };
 
 function CompanyTab() {
@@ -132,6 +134,7 @@ function CompanyTab() {
       allow_negative_stock: company.allow_negative_stock,
       allow_guest_checkout: company.allow_guest_checkout,
       is_active: company.is_active,
+      storefront_slug: company.storefront_slug ?? "",
     });
     setErrors({});
     setOpen(true);
@@ -257,6 +260,12 @@ function CompanyTab() {
                 onChange={(event) => setUpdateForm((prev) => ({ ...prev, address: event.target.value }))}
               />
             </Field>
+            <Field label="Storefront slug" error={errors.storefront_slug}>
+              <Input
+                value={updateForm.storefront_slug}
+                onChange={(event) => setUpdateForm((prev) => ({ ...prev, storefront_slug: event.target.value }))}
+              />
+            </Field>
             <div className="toolbar">
               <label className="pill">
                 <input
@@ -343,6 +352,12 @@ function CompanyTab() {
               <Input
                 value={createForm.address}
                 onChange={(event) => setCreateForm((prev) => ({ ...prev, address: event.target.value }))}
+              />
+            </Field>
+            <Field label="Storefront slug" error={errors.storefront_slug}>
+              <Input
+                value={createForm.storefront_slug}
+                onChange={(event) => setCreateForm((prev) => ({ ...prev, storefront_slug: event.target.value }))}
               />
             </Field>
           </>

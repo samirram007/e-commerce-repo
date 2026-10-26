@@ -2,8 +2,10 @@
 interests (favorites/watchlist), delivery-zone (pincode) checks and the
 anonymous token cart."""
 import hashlib
+import re
 from datetime import date
 from decimal import Decimal
+from xml.sax.saxutils import escape as xml_escape
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -20,16 +22,20 @@ from app.modules.partners.models import Customer
 from app.modules.sales import service as sales_svc
 from app.modules.sales.models import Cart, SalesOrder
 from app.modules.storefront.models import StorefrontAddress
-from app.shared.money import dec
+from app.shared.money import dec, money
 
 INTEREST_KINDS = {"favorite", "watchlist"}
 
-#: Payment methods the mock storefront gateway can offer.
-PAYMENT_METHODS = [
-    {"code": "card", "label": "Credit / Debit card", "provider": "mock"},
-    {"code": "upi", "label": "UPI", "provider": "mock"},
-    {"code": "cod", "label": "Cash on delivery", "provider": "cash"},
+#: Fallback (mock) payment methods used when Razorpay keys are not configured.
+MOCK_PAYMENT_METHODS = [
+    {"code": "card", "label": "Credit / Debit card (sandbox)", "provider": "mock"},
+    {"code": "upi", "label": "UPI (sandbox)", "provider": "mock"},
 ]
+
+COD_METHOD = {"code": "cod", "label": "Cash on delivery", "provider": "cash"}
+
+#: Every method code the checkout may submit.
+PAYMENT_METHOD_CODES = {"card", "upi", "cod", "razorpay"}
 
 
 def _product_brief(p: Product) -> dict:
@@ -42,16 +48,26 @@ def _product_brief(p: Product) -> dict:
         "price": str(p.base_price),
         "stock_type": p.stock_type,
         "view_count": p.view_count,
+        "image_url": product_image_url(p.id),
     }
+
+
+def product_image_url(product_id: str) -> str:
+    """Public URL of the product image. Serves the uploaded photo when the
+    product has one, otherwise a deterministic generated tile (see
+    `placeholder_image_svg`)."""
+    return f"/api/v1/storefront/shop/products/{product_id}/image"
 
 
 # ---- catalog browse ----
 def list_categories(session: Session, company_id: str) -> list[dict]:
+    """Categories with sellable-product counts rolled up through children,
+    so a parent card matches what opening that category actually shows."""
     cats = session.execute(
         select(Category).where(Category.company_id == company_id).order_by(Category.name)
     ).scalars().all()
-    counts: dict[str | None, int] = {}
-    for p in session.execute(
+    own: dict[str, int] = {}
+    for category_id, count in session.execute(
         select(Product.category_id, func.count())
         .where(
             Product.company_id == company_id,
@@ -60,13 +76,28 @@ def list_categories(session: Session, company_id: str) -> list[dict]:
         )
         .group_by(Product.category_id)
     ).all():
-        counts[p[0]] = p[1]
+        if category_id:
+            own[category_id] = count
+
+    children: dict[str, list[str]] = {}
+    for c in cats:
+        if c.parent_id:
+            children.setdefault(c.parent_id, []).append(c.id)
+
+    def subtree_count(category_id: str, depth: int = 0) -> int:
+        total = own.get(category_id, 0)
+        if depth > 10:  # defensive: category trees are small and shallow
+            return total
+        for child in children.get(category_id, []):
+            total += subtree_count(child, depth + 1)
+        return total
+
     return [
         {
             "id": c.id,
             "name": c.name,
             "parent_id": c.parent_id,
-            "product_count": counts.get(c.id, 0) + counts.get(None, 0) if c.parent_id is None else counts.get(c.id, 0),
+            "product_count": subtree_count(c.id),
         }
         for c in cats
     ]
@@ -145,13 +176,83 @@ def trending(session: Session, company_id: str, limit: int = 8) -> list[dict]:
     return [_product_brief(r) for r in rows]
 
 
-def product_detail(session: Session, company_id: str, product_id: str, *, count_view: bool) -> dict:
+#: Emoji hint per category (lower-cased name) for the generated image tile.
+_CATEGORY_EMOJI = {
+    "phones": "\U0001f4f1",
+    "laptops": "\U0001f4bb",
+    "accessories": "\U0001f50c",
+    "apparel": "\U0001f455",
+    "home & kitchen": "\U0001f3e0",
+    "grocery": "\U0001f6d2",
+    "services": "\U0001f6e0\ufe0f",
+    "audio": "\U0001f3a7",
+    "wearables": "\u231a",
+    "cameras": "\U0001f4f7",
+    "tablets": "\U0001f4f2",
+    "sports & outdoors": "\U0001f3c0",
+    "fitness": "\U0001f3cb\ufe0f",
+    "cycling": "\U0001f6b2",
+    "beauty & personal care": "\U0001f9f4",
+    "skincare": "\U0001f9fc",
+    "toys & games": "\U0001f9f8",
+    "stationery": "\u270f\ufe0f",
+    "beverages": "\U0001f964",
+    "snacks": "\U0001f37f",
+}
+
+
+def _resolve_product(session: Session, company_id: str, product_id: str) -> Product:
     product = session.get(Product, product_id)
     if product is None or product.company_id != company_id:
         raise NotFoundError("Product")
+    return product
+
+
+def placeholder_image_svg(session: Session, product: Product) -> bytes:
+    """Deterministic product tile: hue seeded from the SKU, emoji from the
+    category, product name beneath. Keeps the catalog visual without external
+    image services; a real uploaded photo (image_file_id) takes precedence."""
+    hue = int(hashlib.sha256((product.sku or product.id).encode()).hexdigest(), 16) % 360
+    emoji = "\U0001f4e6"
+    if product.category_id:
+        category = session.get(Category, product.category_id)
+        if category is not None:
+            emoji = _CATEGORY_EMOJI.get(category.name.strip().lower(), emoji)
+    name = xml_escape(product.name[:38])
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">'
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+        f'<stop offset="0" stop-color="hsl({hue}, 62%, 76%)"/>'
+        f'<stop offset="1" stop-color="hsl({(hue + 40) % 360}, 58%, 52%)"/>'
+        '</linearGradient></defs>'
+        '<rect width="600" height="600" fill="url(#g)"/>'
+        f'<text x="300" y="300" font-size="190" text-anchor="middle">{emoji}</text>'
+        f'<text x="300" y="430" font-size="30" text-anchor="middle" fill="rgba(255,255,255,0.95)" '
+        'font-family="system-ui, sans-serif">'
+        f'{name}</text>'
+        '</svg>'
+    )
+    return svg.encode("utf-8")
+
+
+def product_detail(session: Session, company_id: str, product_id: str, *, count_view: bool) -> dict:
+    product = _resolve_product(session, company_id, product_id)
     if count_view:
-        product.view_count += 1
+        # bump view count for analytics
+        product.view_count = (product.view_count or 0) + 1
+        session.add(product)
         session.flush()
+    result = {
+        "id": product.id,
+        "sku": product.sku,
+        "name": product.name,
+        "description": product.description,
+        "category_id": product.category_id,
+        "price": str(product.base_price),
+        "stock_type": product.stock_type,
+        "view_count": product.view_count,
+        "image_url": product_image_url(product.id),
+    }
     category = session.get(Category, product.category_id) if product.category_id else None
     related = session.execute(
         select(Product)
@@ -170,7 +271,7 @@ def product_detail(session: Session, company_id: str, product_id: str, *, count_
         .limit(8)
     ).scalars().all()
     return {
-        **_product_brief(product),
+        **result,
         "category_name": category.name if category else None,
         "related": [_product_brief(r) for r in related],
     }
@@ -251,29 +352,150 @@ def claim_anon_interests(session: Session, company_id: str, anon_id: str, user_i
     return moved
 
 
-# ---- pincode delivery ----
+# ---- pincode delivery (India) ----
+
+#: Indian PIN codes are six digits and never start with 0. The first two
+#: digits identify the postal circle, which maps onto a state/UT.
+_PINCODE_STATE_RANGES = [
+    (11, 11, "Delhi"),
+    (12, 13, "Haryana"),
+    (14, 16, "Punjab"),
+    (17, 17, "Himachal Pradesh"),
+    (18, 18, "Jammu & Kashmir"),
+    (19, 19, "Ladakh"),
+    (20, 28, "Uttar Pradesh / Uttarakhand"),
+    (30, 34, "Rajasthan"),
+    (36, 39, "Gujarat"),
+    (40, 44, "Maharashtra"),
+    (45, 48, "Madhya Pradesh"),
+    (49, 49, "Chhattisgarh"),
+    (50, 50, "Telangana"),
+    (51, 53, "Andhra Pradesh"),
+    (56, 59, "Karnataka"),
+    (60, 64, "Tamil Nadu"),
+    (67, 69, "Kerala"),
+    (70, 74, "West Bengal"),
+    (75, 77, "Odisha"),
+    (78, 78, "Assam"),
+    (79, 79, "North East"),
+    (80, 85, "Bihar / Jharkhand"),
+    (90, 99, "Army Postal Service"),
+]
+
+#: City/area hints for well-known sorting districts (first three digits).
+_PINCODE_CITY = {
+    "110": "New Delhi",
+    "122": "Gurugram",
+    "160": "Chandigarh",
+    "171": "Shimla",
+    "190": "Srinagar",
+    "201": "Noida",
+    "208": "Kanpur",
+    "211": "Prayagraj",
+    "221": "Varanasi",
+    "226": "Lucknow",
+    "248": "Dehradun",
+    "250": "Meerut",
+    "302": "Jaipur",
+    "380": "Ahmedabad",
+    "400": "Mumbai",
+    "403": "Panaji",
+    "411": "Pune",
+    "422": "Nashik",
+    "440": "Nagpur",
+    "462": "Bhopal",
+    "492": "Raipur",
+    "500": "Hyderabad",
+    "520": "Vijayawada",
+    "530": "Visakhapatnam",
+    "560": "Bengaluru",
+    "570": "Mysuru",
+    "600": "Chennai",
+    "641": "Coimbatore",
+    "673": "Kozhikode",
+    "682": "Kochi",
+    "695": "Thiruvananthapuram",
+    "700": "Kolkata",
+    "751": "Bhubaneswar",
+    "781": "Guwahati",
+    "800": "Patna",
+    "834": "Ranchi",
+}
+
+
+def normalize_pincode(value: str | None) -> str:
+    """Validate and normalise an Indian PIN code (spaces/dashes tolerated)."""
+    digits = re.sub(r"[\s-]", "", (value or "").strip())
+    if not re.fullmatch(r"[1-9]\d{5}", digits):
+        raise BusinessRuleError(
+            "BAD_PINCODE", "Enter a 6-digit Indian PIN code (it cannot start with 0)"
+        )
+    return digits
+
+
+def normalize_zone_code(value: str | None) -> str:
+    """A delivery rule covers either one PIN code (6 digits) or a prefix
+    (2–5 digits), e.g. `40` for all of Mumbai/Konkan."""
+    code = re.sub(r"[\s-]", "", (value or "").strip())
+    if not re.fullmatch(r"[1-9]\d{1,5}", code):
+        raise BusinessRuleError(
+            "BAD_ZONE", "A delivery zone must be a PIN code or a 2–5 digit prefix"
+        )
+    return code
+
+
+def _resolve_zone(session: Session, company_id: str, pincode: str) -> DeliveryZone | None:
+    """Most specific delivery rule for a PIN code: exact code, else the
+    longest matching prefix (so state-wide coverage needs one row, not 10⁵)."""
+    zones = session.execute(
+        select(DeliveryZone).where(DeliveryZone.company_id == company_id)
+    ).scalars().all()
+    exact = next((z for z in zones if z.pincode == pincode), None)
+    if exact is not None:
+        return exact
+    prefixes = [
+        z for z in zones if 2 <= len(z.pincode) < 6 and pincode.startswith(z.pincode)
+    ]
+    if not prefixes:
+        return None
+    return max(prefixes, key=lambda z: len(z.pincode))
+
+
+def _pincode_state(pincode: str) -> str | None:
+    circle = int(pincode[:2])
+    for low, high, state in _PINCODE_STATE_RANGES:
+        if low <= circle <= high:
+            return state
+    return None
+
+
 def check_pincode(session: Session, company_id: str, pincode: str) -> dict:
-    pincode = pincode.strip()
-    zone = session.scalar(
-        select(DeliveryZone).where(DeliveryZone.company_id == company_id, DeliveryZone.pincode == pincode)
-    )
+    """Resolve an Indian PIN code: region, deliverability, ETA and COD."""
+    pincode = normalize_pincode(pincode)
+    zone = _resolve_zone(session, company_id, pincode)
+    result = {
+        "pincode": pincode,
+        "valid": True,
+        "state": _pincode_state(pincode),
+        "city": _PINCODE_CITY.get(pincode[:3]),
+        "deliverable": False,
+        "eta_days": None,
+        "cod_allowed": False,
+        "configured": zone is not None,
+    }
     if zone is not None:
-        return {
-            "pincode": pincode,
-            "deliverable": zone.deliverable,
-            "eta_days": zone.eta_days,
-            "cod_allowed": zone.cod_allowed,
-            "configured": True,
-        }
-    return {"pincode": pincode, "deliverable": False, "eta_days": None, "cod_allowed": False, "configured": False}
+        result.update(
+            deliverable=zone.deliverable,
+            eta_days=zone.eta_days,
+            cod_allowed=zone.cod_allowed,
+        )
+    return result
 
 
 def set_delivery_zone(
     session: Session, company_id: str, *, pincode: str, deliverable: bool, eta_days: int, cod_allowed: bool
 ) -> DeliveryZone:
-    pincode = pincode.strip()
-    if not pincode:
-        raise BusinessRuleError("PINCODE_REQUIRED", "pincode is required")
+    pincode = normalize_zone_code(pincode)
     if eta_days < 1:
         raise BusinessRuleError("BAD_ETA", "eta_days must be >= 1")
     zone = session.scalar(
@@ -299,42 +521,56 @@ def token_cart(session: Session, company_id: str, token: str) -> Cart:
 
 
 def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
+    """Cart payload for the storefront: product data plus the authoritative
+    per-line pricing from `quote_cart` so the UI never computes totals itself."""
     cart = token_cart(session, company_id, token)
-    items = sales_svc.cart_items(session, cart.id)
+    rows = sales_svc.cart_items(session, cart.id)
     products = {
         p.id: p
         for p in session.execute(
-            select(Product).where(Product.id.in_([i.product_id for i in items]))
+            select(Product).where(Product.id.in_([i.product_id for i in rows]))
         ).scalars().all()
-    } if items else {}
+    } if rows else {}
     quote = sales_svc.quote_cart(session, cart)
-    return {
-        "id": cart.id,
-        "status": cart.status,
-        "token": token,
-        "items": [
+    priced = {line["item_id"]: line for line in quote["lines"]}
+    items = []
+    for row in rows:
+        product = products.get(row.product_id)
+        line = priced.get(row.id, {})
+        unit_price = line.get("unit_price") or (str(product.base_price) if product else "0")
+        items.append(
             {
-                "id": i.id,
-                "product_id": i.product_id,
-                "qty": str(i.qty),
-                "name": products[i.product_id].name if i.product_id in products else "Item",
-                "sku": products[i.product_id].sku if i.product_id in products else "",
-                "price": str(products[i.product_id].base_price) if i.product_id in products else "0",
+                "id": row.id,
+                "product_id": row.product_id,
+                "qty": str(row.qty),
+                "name": product.name if product else "Item",
+                "sku": product.sku if product else "",
+                "price": unit_price,
+                "unit_price": unit_price,
+                "tax_amount": line.get("tax_amount", "0"),
+                "line_total": line.get("line_total", "0"),
+                "stock_type": product.stock_type if product else "stock",
+                "image_url": product_image_url(product.id) if product else None,
             }
-            for i in items
-        ],
-        "quote": quote,
-    }
+        )
+    return {"id": cart.id, "status": cart.status, "token": token, "items": items, "quote": quote}
 
 
 # ---- store info (public storefront bootstrap) ----
 def store_info(session: Session, slug: str) -> dict:
-    """Resolve a public storefront by its slug (no auth required)."""
+    """Resolve a public storefront by its slug (no auth required).
+
+    Leftover dev/test companies can share a slug, so pick the oldest match
+    instead of letting the database return an arbitrary row.
+    """
     company = session.scalar(
-        select(Company).where(
+        select(Company)
+        .where(
             Company.storefront_slug == slug.strip().lower(),
             Company.is_active.is_(True),
         )
+        .order_by(Company.created_at, Company.id)
+        .limit(1)
     )
     if company is None:
         raise NotFoundError("Store")
@@ -348,20 +584,41 @@ def store_info(session: Session, slug: str) -> dict:
 
 
 def payment_methods(session: Session, company_id: str, *, pincode: str | None = None) -> list[dict]:
-    """Available payment methods; COD depends on the pincode's delivery zone."""
+    """Available payment methods.
+
+    Razorpay (cards/UPI/netbanking) is offered whenever keys are configured;
+    without keys the storefront keeps its sandbox gateway so local development
+    (and the demo seed) still works. COD depends on the pincode's zone.
+    """
+    from app.core.config import get_settings
+
     zone = None
-    if pincode:
-        zone = session.scalar(
-            select(DeliveryZone).where(
-                DeliveryZone.company_id == company_id, DeliveryZone.pincode == pincode.strip()
-            )
+    if pincode and pincode.strip():
+        zone = _resolve_zone(session, company_id, normalize_pincode(pincode))
+    out: list[dict] = []
+    if get_settings().razorpay_configured:
+        out.append(
+            {
+                "code": "razorpay",
+                "label": "Cards / UPI / Netbanking",
+                "provider": "razorpay",
+                "available": True,
+            }
         )
-    out = []
-    for method in PAYMENT_METHODS:
-        available = True
-        if method["code"] == "cod" and zone is not None:
-            available = zone.cod_allowed
-        out.append({**method, "available": available})
+    else:
+        out.extend({**method, "available": True} for method in MOCK_PAYMENT_METHODS)
+        # Tells the checkout UI why the Razorpay window never opens: no keys.
+        out.append(
+            {
+                "code": "razorpay",
+                "label": "Cards / UPI / Netbanking",
+                "provider": "razorpay",
+                "available": False,
+                "reason": "not_configured",
+            }
+        )
+    cod_available = zone.cod_allowed if zone is not None else True
+    out.append({**COD_METHOD, "available": cod_available})
     return out
 
 
@@ -490,12 +747,23 @@ def _format_address(address: dict) -> str:
 
 
 def _order_out(session: Session, order: SalesOrder) -> dict:
+    from app.modules.payments.models import PaymentRecord
+
     lines = sales_svc.get_order_lines(session, order.id)
+    latest_payment = session.scalar(
+        select(PaymentRecord)
+        .where(PaymentRecord.order_id == order.id, PaymentRecord.direction == "receipt")
+        .order_by(PaymentRecord.occurred_at.desc())
+    )
     return {
         "id": order.id,
+        "payment_method": latest_payment.method if latest_payment else None,
+        "payment_status": latest_payment.status if latest_payment else None,
         "doc_number": order.doc_number,
         "status": order.status,
         "payment_state": order.payment_state,
+        "cancel_reason": order.cancel_reason,
+        "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else None,
         "order_date": str(order.order_date),
         "currency": order.currency,
         "subtotal": str(order.subtotal),
@@ -535,26 +803,28 @@ def guest_checkout(
         raise BusinessRuleError("EMPTY_CART", "Cart is empty")
 
     address = payload.get("address") or {}
-    pincode = (address.get("pincode") or "").strip()
+    raw_pincode = (address.get("pincode") or "").strip()
+    pincode = normalize_pincode(raw_pincode) if raw_pincode else ""
     zones = session.execute(
         select(func.count()).select_from(DeliveryZone).where(DeliveryZone.company_id == company_id)
     ).scalar_one()
-    zone = None
-    if pincode:
-        zone = session.scalar(
-            select(DeliveryZone).where(
-                DeliveryZone.company_id == company_id, DeliveryZone.pincode == pincode
-            )
-        )
+    zone = _resolve_zone(session, company_id, pincode) if pincode else None
+    if zones and not pincode:
+        raise BusinessRuleError("PINCODE_REQUIRED", "A delivery PIN code is required")
     if zones and (zone is None or not zone.deliverable):
         raise BusinessRuleError("NOT_DELIVERABLE", f"We do not deliver to {pincode}")
 
-    method = (payload.get("payment_method") or "card").lower()
-    if method not in {m["code"] for m in PAYMENT_METHODS}:
+    method = (payload.get("payment_method") or "razorpay").lower()
+    if method not in PAYMENT_METHOD_CODES:
         raise BusinessRuleError("BAD_PAYMENT_METHOD", f"Unknown payment method '{method}'")
-    if method == "cod" and zone is not None and not zone.cod_allowed:
+    available = {
+        m["code"]
+        for m in payment_methods(session, company_id, pincode=pincode or None)
+        if m["available"]
+    }
+    if method not in available:
         raise BusinessRuleError(
-            "COD_NOT_AVAILABLE", "Cash on delivery is unavailable for this pincode"
+            "PAYMENT_METHOD_UNAVAILABLE", f"'{method}' is not available for this checkout"
         )
 
     customer = _guest_customer(
@@ -581,7 +851,15 @@ def guest_checkout(
         idempotency_key=idempotency_key,
     )
     payment_state = order.payment_state
-    if method != "cod" and order.status == "pending_payment":
+    # COD confirms the order now and books an open cash receipt that the
+    # delivery step settles. Online capture (Razorpay) happens in the browser
+    # after the order exists; only the sandbox methods are charged here.
+    if method == "cod" and order.status == "pending_payment":
+        sales_svc.accept_cash_on_delivery(
+            session, company_id=company_id, order=order, actor_user_id=None
+        )
+        payment_state = order.payment_state
+    if method in {"card", "upi"} and order.status == "pending_payment":
         order, _payment = sales_svc.pay_order(
             session,
             company_id=company_id,
@@ -603,6 +881,9 @@ def guest_checkout(
 
 def guest_orders(session: Session, company_id: str, cart_token: str) -> list[dict]:
     """Orders placed from this browser's cart token (continue purchase)."""
+    # Release stock held by abandoned gateway checkouts before listing, so a
+    # shopper never sees a stale "pending payment" order that can still be paid.
+    sales_svc.expire_unpaid_orders(session, company_id=company_id)
     cart_ids = session.execute(
         select(Cart.id).where(Cart.company_id == company_id, Cart.token == cart_token)
     ).scalars().all()
@@ -626,8 +907,11 @@ def guest_pay_order(
     cart = session.get(Cart, order.cart_id) if order.cart_id else None
     if cart is None or cart.token != cart_token:
         raise BusinessRuleError("ORDER_NOT_OWNED", "This order belongs to another cart")
-    if method not in {m["code"] for m in PAYMENT_METHODS} or method == "cod":
-        raise BusinessRuleError("BAD_PAYMENT_METHOD", "Choose an online payment method")
+    if method not in {"card", "upi"}:
+        raise BusinessRuleError(
+            "BAD_PAYMENT_METHOD",
+            "Sandbox payments only; use the Razorpay checkout for online payments",
+        )
     order, _payment = sales_svc.pay_order(
         session,
         company_id=company_id,
@@ -638,3 +922,373 @@ def guest_pay_order(
         idempotency_key=f"pay:{order.id}",
     )
     return {**_order_out(session, order), "payment_method": method}
+
+
+# ---- Razorpay online payments ----
+def _owned_order(session: Session, company_id: str, cart_token: str, order_id: str) -> SalesOrder:
+    """An order is only reachable through the cart token that placed it."""
+    order = session.get(SalesOrder, order_id)
+    if order is None or order.company_id != company_id:
+        raise NotFoundError("Sales order")
+    cart = session.get(Cart, order.cart_id) if order.cart_id else None
+    if cart is None or cart.token != cart_token:
+        raise BusinessRuleError("ORDER_NOT_OWNED", "This order belongs to another cart")
+    return order
+
+
+def _late_capture_refund(
+    session: Session, *, order: SalesOrder, payment_id: str, amount, currency: str | None
+) -> dict:
+    """Give back money captured after the order expired or was cancelled.
+
+    Books the capture as a receipt and the refund as a payment out, so the
+    payment trail shows both legs. Replays are keyed by the Razorpay payment id
+    (`Refund of <payment_id>`), so a duplicate webhook never refunds twice.
+    """
+    from app.modules.payments import service as payments
+    from app.modules.payments.models import PaymentRecord
+
+    already = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.provider == "razorpay",
+            PaymentRecord.direction == "payment",
+            PaymentRecord.notes == f"Refund of {payment_id}",
+        )
+    )
+    if already is not None:
+        order.payment_state = "refunded"
+        session.flush()
+        return {"refunded": True, "replayed": True, "refund_payment_id": already.id}
+
+    captured = payments.record_captured_payment(
+        session,
+        company_id=order.company_id,
+        actor_user_id=None,
+        customer_id=order.customer_id,
+        order_id=order.id,
+        amount=amount,
+        currency=currency or order.currency,
+        method="razorpay",
+        provider="razorpay",
+        provider_ref=payment_id,
+        notes=f"Late capture on cancelled order {order.doc_number}",
+    )
+    refund = payments.provider_refund(
+        session,
+        company_id=order.company_id,
+        actor_user_id=None,
+        original=captured,
+        amount=amount,
+    )
+    refund.direction = "payment"
+    order.payment_state = "refunded"
+    session.flush()
+    return {"refunded": True, "replayed": False, "refund_payment_id": refund.id}
+
+
+def _razorpay_intent(session: Session, company_id: str, order_id: str):
+    from app.modules.payments.models import PaymentRecord
+
+    return session.scalar(
+        select(PaymentRecord)
+        .where(
+            PaymentRecord.company_id == company_id,
+            PaymentRecord.order_id == order_id,
+            PaymentRecord.provider == "razorpay",
+            PaymentRecord.status == "pending",
+        )
+        .order_by(PaymentRecord.created_at.desc())
+    )
+
+
+def create_razorpay_order(
+    session: Session, *, company_id: str, cart_token: str, order_id: str
+) -> dict:
+    """Server-side Razorpay order for a pending storefront order.
+
+    The gateway order id is stored on a pending PaymentRecord so the browser
+    cannot redirect a payment to a different order (or a different tenant).
+    """
+    from datetime import datetime, timezone
+
+    from app.core.config import get_settings
+    from app.modules.companies.service import rate_for
+    from app.modules.payments import razorpay
+    from app.modules.payments.models import PaymentRecord
+
+    settings = get_settings()
+    if not settings.razorpay_configured:
+        raise BusinessRuleError(
+            "RAZORPAY_NOT_CONFIGURED",
+            "Online payments are unavailable: set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET",
+        )
+    order = _owned_order(session, company_id, cart_token, order_id)
+    if order.payment_state == "paid":
+        raise BusinessRuleError("ORDER_ALREADY_PAID", "This order is already paid")
+    if order.status != "pending_payment":
+        raise BusinessRuleError(
+            "ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be paid"
+        )
+
+    intent = _razorpay_intent(session, company_id, order.id)
+    if intent is not None:
+        gateway_order_id = intent.provider_ref.removeprefix("order:")
+    else:
+        company = session.get(Company, company_id)
+        gateway = razorpay.create_order(
+            amount_paise=razorpay.amount_to_paise(order.total),
+            currency=order.currency,
+            receipt=order.doc_number,
+            notes={"order_id": order.id, "company_id": company_id, "doc_number": order.doc_number},
+        )
+        gateway_order_id = gateway["id"]
+        exchange_rate = dec(
+            rate_for(
+                session,
+                company_id=company_id,
+                from_currency=order.currency,
+                base_currency=company.base_currency if company else order.currency,
+                on_date=order.order_date,
+            )
+        )
+        intent = PaymentRecord(
+            company_id=company_id,
+            direction="receipt",
+            method="razorpay",
+            provider="razorpay",
+            provider_ref=f"order:{gateway_order_id}",
+            status="pending",
+            amount=dec(order.total),
+            currency=order.currency,
+            exchange_rate=exchange_rate,
+            amount_base=money(dec(order.total) * exchange_rate, 2),
+            customer_id=order.customer_id,
+            order_id=order.id,
+            occurred_at=datetime.now(timezone.utc),
+            idempotency_scope="razorpay_intent",
+            notes=f"Razorpay order {gateway_order_id}",
+        )
+        session.add(intent)
+        session.flush()
+
+    company = session.get(Company, company_id)
+    return {
+        "key_id": settings.razorpay_key_id,
+        "razorpay_order_id": gateway_order_id,
+        "amount": razorpay.amount_to_paise(order.total),
+        "currency": order.currency,
+        "order_id": order.id,
+        "doc_number": order.doc_number,
+        "store_name": company.name if company else "Store",
+        "description": f"Order {order.doc_number}",
+    }
+
+
+def verify_razorpay_payment(
+    session: Session, *, company_id: str, cart_token: str, order_id: str,
+    razorpay_order_id: str, razorpay_payment_id: str, razorpay_signature: str,
+) -> dict:
+    """Confirm Checkout success: signature → payment captured → order paid."""
+    from app.modules.payments import razorpay
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    if order.payment_state == "paid":
+        # verified callback and webhook may both arrive; second call is a no-op
+        return _order_out(session, order)
+    intent = _razorpay_intent(session, company_id, order.id)
+    if intent is None or intent.provider_ref != f"order:{razorpay_order_id}":
+        if order.status == "cancelled":
+            # The hold expired before the shopper finished paying. The signature
+            # proves the capture is genuine, so refund it instead of booking it.
+            razorpay.verify_payment_signature(
+                order_id=razorpay_order_id,
+                payment_id=razorpay_payment_id,
+                signature=razorpay_signature,
+            )
+            payment = razorpay.fetch_payment(razorpay_payment_id)
+            if payment.get("order_id") not in (None, razorpay_order_id):
+                raise BusinessRuleError(
+                    "RAZORPAY_ORDER_MISMATCH", "Payment belongs to a different order"
+                )
+            refund = _late_capture_refund(
+                session,
+                order=order,
+                payment_id=razorpay_payment_id,
+                amount=dec(payment.get("amount") or 0) / dec(100),
+                currency=payment.get("currency"),
+            )
+            return {**_order_out(session, order), **refund}
+        raise BusinessRuleError(
+            "RAZORPAY_NO_INTENT", "No Razorpay order is pending for this order"
+        )
+    razorpay.verify_payment_signature(
+        order_id=razorpay_order_id,
+        payment_id=razorpay_payment_id,
+        signature=razorpay_signature,
+    )
+    order, payment = sales_svc.confirm_external_payment(
+        session,
+        company_id=company_id,
+        actor_user_id=None,
+        order_id=order.id,
+        provider="razorpay",
+        provider_ref=razorpay_payment_id,
+        method="razorpay",
+        existing_payment=intent,
+    )
+    return {**_order_out(session, order), "payment_id": payment.id if payment else None}
+
+
+def handle_razorpay_webhook(session: Session, *, raw_body: bytes, signature: str | None) -> dict:
+    """Verify and apply Razorpay webhooks (capture events) idempotently."""
+    import json
+
+    from app.modules.payments import razorpay
+
+    razorpay.verify_webhook_signature(raw_body, signature)
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except ValueError as exc:
+        raise BusinessRuleError("RAZORPAY_BAD_PAYLOAD", "Webhook body is not JSON") from exc
+
+    event = payload.get("event", "")
+    bundles = payload.get("payload") or {}
+    payment_entity = (bundles.get("payment") or {}).get("entity") or {}
+    order_entity = (bundles.get("order") or {}).get("entity") or {}
+    notes = {**(order_entity.get("notes") or {}), **(payment_entity.get("notes") or {})}
+    company_id = notes.get("company_id")
+    order_id = notes.get("order_id")
+    razorpay_order_id = payment_entity.get("order_id") or order_entity.get("id")
+    razorpay_payment_id = payment_entity.get("id")
+
+    result = {"event": event, "handled": False, "order_id": order_id}
+    if event not in {"payment.captured", "order.paid", "payment.failed"}:
+        return {**result, "ignored": True}
+    if not company_id or not order_id or not razorpay_order_id:
+        return {**result, "ignored": True}
+
+    order = session.get(SalesOrder, order_id)
+    if order is None or order.company_id != company_id:
+        return result
+    if event == "payment.failed":
+        return {**result, "payment_state": order.payment_state, "failed": True}
+    if order.payment_state == "paid":
+        return {**result, "handled": True, "replayed": True, "status": order.status}
+    if order.status == "cancelled":
+        # Captured after the order expired (or was cancelled): refund in full.
+        amount = dec(payment_entity.get("amount") or 0) / dec(100)
+        if not razorpay_payment_id or amount <= 0:
+            return {**result, "ignored": True, "reason": "no_payment_entity"}
+        refund = _late_capture_refund(
+            session,
+            order=order,
+            payment_id=razorpay_payment_id,
+            amount=amount,
+            currency=payment_entity.get("currency"),
+        )
+        return {
+            **result,
+            **refund,
+            "handled": True,
+            "status": order.status,
+            "payment_state": order.payment_state,
+        }
+
+    intent = _razorpay_intent(session, company_id, order.id)
+    if intent is None or intent.provider_ref != f"order:{razorpay_order_id}":
+        return result
+    order, payment = sales_svc.confirm_external_payment(
+        session,
+        company_id=company_id,
+        actor_user_id=None,
+        order_id=order.id,
+        provider="razorpay",
+        provider_ref=razorpay_payment_id or razorpay_order_id,
+        method="razorpay",
+        existing_payment=intent,
+    )
+    return {
+        **result,
+        "handled": True,
+        "status": order.status,
+        "payment_state": order.payment_state,
+        "payment_id": payment.id if payment else None,
+    }
+
+
+# ---- cancellation & returns ----
+def guest_cancel_order(
+    session: Session, *, company_id: str, cart_token: str, order_id: str
+) -> dict:
+    """Cancel an order: unpaid releases stock, paid refunds through the gateway."""
+    from app.modules.returns import service as returns_svc
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    result = returns_svc.cancel_order_with_refund(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        actor_user_id=None,
+        reason="Cancelled by the shopper",
+        cancel_reason="cancelled_by_customer",
+    )
+    return {**_order_out(session, order), **result, "cancelled": True}
+
+
+def _return_out(session: Session, row) -> dict:
+    from app.modules.returns import service as returns_svc
+
+    return {
+        "id": row.id,
+        "doc_number": row.doc_number,
+        "order_id": row.order_id,
+        "status": row.status,
+        "requested_at": row.requested_at.isoformat() if row.requested_at else None,
+        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "credit_note_id": row.credit_note_id,
+        "refund_payment_id": row.refund_payment_id,
+        "notes": row.notes,
+        "lines": [
+            {
+                "id": line.id,
+                "product_id": line.product_id,
+                "qty": str(line.qty),
+                "unit_price": str(line.unit_price),
+                "disposition": line.disposition,
+            }
+            for line in returns_svc.return_lines(session, row.id)
+        ],
+    }
+
+
+def guest_order_returns(
+    session: Session, company_id: str, cart_token: str, order_id: str
+) -> list[dict]:
+    from app.modules.returns.models import SalesReturn
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    rows = session.execute(
+        select(SalesReturn)
+        .where(SalesReturn.company_id == company_id, SalesReturn.order_id == order.id)
+        .order_by(SalesReturn.created_at.desc())
+    ).scalars().all()
+    return [_return_out(session, row) for row in rows]
+
+
+def guest_request_return(
+    session: Session, *, company_id: str, cart_token: str, order_id: str,
+    lines: list[dict], notes: str | None = None,
+) -> dict:
+    """Shopper return request (pending ERP approval/completion)."""
+    from app.modules.returns import service as returns_svc
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    row = returns_svc.request_order_return(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        actor_user_id=None,
+        lines=lines,
+        notes=notes,
+    )
+    return _return_out(session, row)

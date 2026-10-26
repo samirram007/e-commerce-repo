@@ -176,7 +176,7 @@ function ProtectedLayout(): React.JSX.Element {
   // Session can lapse mid-visit (token expiry / logout elsewhere).
   useEffect(() => {
     if (status === "guest") {
-      void navigate({ to: "/login" });
+      void navigate({ to: "/shop" });
     }
   }, [status, navigate]);
 

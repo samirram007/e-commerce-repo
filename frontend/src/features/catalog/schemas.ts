@@ -13,6 +13,8 @@ export const productSchema = z.object({
   category_id: z.string().nullable(),
   uom_id: z.string().nullable(),
   barcode: z.string().nullable(),
+  /** HSN (goods) / SAC (services) code printed on GST invoices. */
+  hsn_sac: z.string().nullable(),
   stock_type: z.string(),
   track_batches: z.boolean(),
   track_serials: z.boolean(),
@@ -56,6 +58,12 @@ export const productFormSchema = z.object({
   category_id: z.string().nullable().optional(),
   uom_id: z.string().nullable().optional(),
   barcode: z.string().trim().max(64).optional(),
+  hsn_sac: z
+    .string()
+    .trim()
+    .max(12)
+    .refine((value) => value === "" || /^\d{4,8}$/.test(value), "Use a 4–8 digit HSN/SAC code")
+    .optional(),
   stock_type: z.enum(STOCK_TYPES),
   track_batches: z.boolean(),
   track_serials: z.boolean(),

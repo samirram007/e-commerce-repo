@@ -224,6 +224,57 @@ def provider_charge(
     return record
 
 
+def record_captured_payment(
+    session: Session, *, company_id: str, actor_user_id: str | None, customer_id: str | None,
+    order_id: str | None, amount, currency: str, method: str, provider: str,
+    provider_ref: str, notes: str | None = None,
+) -> PaymentRecord:
+    """Record a payment the provider already captured (e.g. Razorpay Checkout).
+
+    Idempotent by (provider, provider_ref): replaying a verified callback or a
+    duplicate webhook returns the existing row instead of double-booking.
+    """
+    existing = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.provider == provider, PaymentRecord.provider_ref == provider_ref
+        )
+    )
+    if existing is not None:
+        return existing
+    company = _company(session, company_id)
+    amount = money(dec(amount), 2)
+    exchange_rate = dec(
+        rate_for(
+            session,
+            company_id=company_id,
+            from_currency=currency,
+            base_currency=company.base_currency,
+            on_date=datetime.now(timezone.utc).date(),
+        )
+    )
+    record = PaymentRecord(
+        company_id=company_id,
+        direction="receipt",
+        method=method,
+        provider=provider,
+        provider_ref=provider_ref,
+        status="succeeded",
+        amount=amount,
+        currency=currency,
+        exchange_rate=exchange_rate,
+        amount_base=money(amount * exchange_rate, 2),
+        customer_id=customer_id,
+        order_id=order_id,
+        occurred_at=datetime.now(timezone.utc),
+        idempotency_scope="checkout",
+        notes=notes,
+        created_by=actor_user_id,
+    )
+    session.add(record)
+    session.flush()
+    return record
+
+
 def provider_refund(
     session: Session, *, company_id: str, actor_user_id: str, original: PaymentRecord, amount, currency: str | None = None,
 ) -> PaymentRecord:
@@ -236,7 +287,9 @@ def provider_refund(
     original_refunded = session.execute(
         select(func.sum(PaymentRecord.amount)).where(
             PaymentRecord.company_id == original.company_id,
-            PaymentRecord.provider_ref == f"refund_{original.provider_ref}",
+            PaymentRecord.provider == original.provider,
+            PaymentRecord.direction.in_(["payment", "receipt"]),
+            PaymentRecord.notes == f"Refund of {original.provider_ref}",
             PaymentRecord.status.in_(["succeeded", "pending"]),
         )
     ).scalar() or Decimal("0")
