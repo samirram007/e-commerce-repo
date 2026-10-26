@@ -12,11 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as GuestRouteImport } from './routes/_guest'
 import { Route as ProtectedRouteImport } from './routes/_protected'
+<<<<<<< HEAD
 import { Route as ShopRouteImport } from './routes/shop'
+=======
+import { Route as ShopRouteImport } from './routes/_shop'
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 import { Route as GuestLoginRouteImport } from './routes/_guest/login'
-import { Route as ProtectedIndexRouteImport } from './routes/_protected/index'
 import { Route as ProtectedAccountingRouteImport } from './routes/_protected/accounting'
 import { Route as ProtectedAuditRouteImport } from './routes/_protected/audit'
+import { Route as ProtectedDashboardRouteImport } from './routes/_protected/dashboard'
 import { Route as ProtectedInventoryRouteImport } from './routes/_protected/inventory'
 import { Route as ProtectedInvoicesRouteImport } from './routes/_protected/invoices'
 import { Route as ProtectedOrdersRouteImport } from './routes/_protected/orders'
@@ -32,6 +36,7 @@ import { Route as ProtectedSettingsRouteImport } from './routes/_protected/setti
 import { Route as ProtectedSetupRouteImport } from './routes/_protected/setup'
 import { Route as ProtectedShipmentsRouteImport } from './routes/_protected/shipments'
 import { Route as ProtectedUsersRouteImport } from './routes/_protected/users'
+<<<<<<< HEAD
 import { Route as ShopIndexRouteImport } from './routes/shop/index'
 import { Route as ShopCartRouteImport } from './routes/shop/cart'
 import { Route as ShopCheckoutRouteImport } from './routes/shop/checkout'
@@ -40,6 +45,21 @@ import { Route as ShopOrdersRouteImport } from './routes/shop/orders'
 import { Route as ShopProductsRouteImport } from './routes/shop/products'
 import { Route as ShopProductsIndexRouteImport } from './routes/shop/products/index'
 import { Route as ShopProductsProductIdRouteImport } from './routes/shop/products.$productId'
+=======
+import { Route as ShopIndexRouteImport } from './routes/_shop/index'
+import { Route as ShopAboutRouteImport } from './routes/_shop/about'
+import { Route as ShopCartRouteImport } from './routes/_shop/cart'
+import { Route as ShopCategoriesRouteImport } from './routes/_shop/categories'
+import { Route as ShopCheckoutRouteImport } from './routes/_shop/checkout'
+import { Route as ShopContactRouteImport } from './routes/_shop/contact'
+import { Route as ShopDealsRouteImport } from './routes/_shop/deals'
+import { Route as ShopFaqRouteImport } from './routes/_shop/faq'
+import { Route as ShopOrderSuccessRouteImport } from './routes/_shop/order-success'
+import { Route as ShopWishlistRouteImport } from './routes/_shop/wishlist'
+import { Route as ShopPoliciesSlugRouteImport } from './routes/_shop/policies.$slug'
+import { Route as ShopShopIndexRouteImport } from './routes/_shop/shop.index'
+import { Route as ShopShopProductIdRouteImport } from './routes/_shop/shop.$productId'
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
@@ -55,19 +75,18 @@ const ProtectedRoute = ProtectedRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const ShopRoute = ShopRouteImport.update({
+<<<<<<< HEAD
   id: '/shop',
   path: '/shop',
+=======
+  id: '/_shop',
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
   getParentRoute: () => rootRouteImport,
 } as any)
 const GuestLoginRoute = GuestLoginRouteImport.update({
   id: '/login',
   path: '/login',
   getParentRoute: () => GuestRoute,
-} as any)
-const ProtectedIndexRoute = ProtectedIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ProtectedRoute,
 } as any)
 const ProtectedAccountingRoute = ProtectedAccountingRouteImport.update({
   id: '/accounting',
@@ -77,6 +96,11 @@ const ProtectedAccountingRoute = ProtectedAccountingRouteImport.update({
 const ProtectedAuditRoute = ProtectedAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => ProtectedRoute,
+} as any)
+const ProtectedDashboardRoute = ProtectedDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => ProtectedRoute,
 } as any)
 const ProtectedInventoryRoute = ProtectedInventoryRouteImport.update({
@@ -159,16 +183,33 @@ const ShopIndexRoute = ShopIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ShopRoute,
 } as any)
+<<<<<<< HEAD
+=======
+const ShopAboutRoute = ShopAboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => ShopRoute,
+} as any)
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 const ShopCartRoute = ShopCartRouteImport.update({
   id: '/cart',
   path: '/cart',
   getParentRoute: () => ShopRoute,
 } as any)
+<<<<<<< HEAD
+=======
+const ShopCategoriesRoute = ShopCategoriesRouteImport.update({
+  id: '/categories',
+  path: '/categories',
+  getParentRoute: () => ShopRoute,
+} as any)
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 const ShopCheckoutRoute = ShopCheckoutRouteImport.update({
   id: '/checkout',
   path: '/checkout',
   getParentRoute: () => ShopRoute,
 } as any)
+<<<<<<< HEAD
 const ShopInterestsRoute = ShopInterestsRouteImport.update({
   id: '/interests',
   path: '/interests',
@@ -193,15 +234,61 @@ const ShopProductsProductIdRoute = ShopProductsProductIdRouteImport.update({
   id: '/$productId',
   path: '/$productId',
   getParentRoute: () => ShopProductsRoute,
+=======
+const ShopContactRoute = ShopContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopDealsRoute = ShopDealsRouteImport.update({
+  id: '/deals',
+  path: '/deals',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopFaqRoute = ShopFaqRouteImport.update({
+  id: '/faq',
+  path: '/faq',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopOrderSuccessRoute = ShopOrderSuccessRouteImport.update({
+  id: '/order-success',
+  path: '/order-success',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopWishlistRoute = ShopWishlistRouteImport.update({
+  id: '/wishlist',
+  path: '/wishlist',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopPoliciesSlugRoute = ShopPoliciesSlugRouteImport.update({
+  id: '/policies/$slug',
+  path: '/policies/$slug',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopShopIndexRoute = ShopShopIndexRouteImport.update({
+  id: '/shop/',
+  path: '/shop/',
+  getParentRoute: () => ShopRoute,
+} as any)
+const ShopShopProductIdRoute = ShopShopProductIdRouteImport.update({
+  id: '/shop/$productId',
+  path: '/shop/$productId',
+  getParentRoute: () => ShopRoute,
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 } as any)
 
 export interface FileRoutesByFullPath {
   '/$': typeof SplatRoute
+<<<<<<< HEAD
   '/': typeof ProtectedIndexRoute
   '/shop': typeof ShopRouteWithChildren
+=======
+  '/': typeof ShopIndexRoute
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
   '/login': typeof GuestLoginRoute
   '/accounting': typeof ProtectedAccountingRoute
   '/audit': typeof ProtectedAuditRoute
+  '/dashboard': typeof ProtectedDashboardRoute
   '/inventory': typeof ProtectedInventoryRoute
   '/invoices': typeof ProtectedInvoicesRoute
   '/orders': typeof ProtectedOrdersRoute
@@ -217,6 +304,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
   '/users': typeof ProtectedUsersRoute
+<<<<<<< HEAD
   '/shop/cart': typeof ShopCartRoute
   '/shop/checkout': typeof ShopCheckoutRoute
   '/shop/interests': typeof ShopInterestsRoute
@@ -225,13 +313,28 @@ export interface FileRoutesByFullPath {
   '/shop/': typeof ShopIndexRoute
   '/shop/products/$productId': typeof ShopProductsProductIdRoute
   '/shop/products/': typeof ShopProductsIndexRoute
+=======
+  '/about': typeof ShopAboutRoute
+  '/cart': typeof ShopCartRoute
+  '/categories': typeof ShopCategoriesRoute
+  '/checkout': typeof ShopCheckoutRoute
+  '/contact': typeof ShopContactRoute
+  '/deals': typeof ShopDealsRoute
+  '/faq': typeof ShopFaqRoute
+  '/order-success': typeof ShopOrderSuccessRoute
+  '/wishlist': typeof ShopWishlistRoute
+  '/policies/$slug': typeof ShopPoliciesSlugRoute
+  '/shop/$productId': typeof ShopShopProductIdRoute
+  '/shop/': typeof ShopShopIndexRoute
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 }
 export interface FileRoutesByTo {
   '/$': typeof SplatRoute
-  '/': typeof ProtectedIndexRoute
+  '/': typeof ShopIndexRoute
   '/login': typeof GuestLoginRoute
   '/accounting': typeof ProtectedAccountingRoute
   '/audit': typeof ProtectedAuditRoute
+  '/dashboard': typeof ProtectedDashboardRoute
   '/inventory': typeof ProtectedInventoryRoute
   '/invoices': typeof ProtectedInvoicesRoute
   '/orders': typeof ProtectedOrdersRoute
@@ -247,6 +350,7 @@ export interface FileRoutesByTo {
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
   '/users': typeof ProtectedUsersRoute
+<<<<<<< HEAD
   '/shop/cart': typeof ShopCartRoute
   '/shop/checkout': typeof ShopCheckoutRoute
   '/shop/interests': typeof ShopInterestsRoute
@@ -254,16 +358,35 @@ export interface FileRoutesByTo {
   '/shop': typeof ShopIndexRoute
   '/shop/products/$productId': typeof ShopProductsProductIdRoute
   '/shop/products': typeof ShopProductsIndexRoute
+=======
+  '/about': typeof ShopAboutRoute
+  '/cart': typeof ShopCartRoute
+  '/categories': typeof ShopCategoriesRoute
+  '/checkout': typeof ShopCheckoutRoute
+  '/contact': typeof ShopContactRoute
+  '/deals': typeof ShopDealsRoute
+  '/faq': typeof ShopFaqRoute
+  '/order-success': typeof ShopOrderSuccessRoute
+  '/wishlist': typeof ShopWishlistRoute
+  '/policies/$slug': typeof ShopPoliciesSlugRoute
+  '/shop/$productId': typeof ShopShopProductIdRoute
+  '/shop': typeof ShopShopIndexRoute
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/$': typeof SplatRoute
   '/_guest': typeof GuestRouteWithChildren
   '/_protected': typeof ProtectedRouteWithChildren
+<<<<<<< HEAD
   '/shop': typeof ShopRouteWithChildren
+=======
+  '/_shop': typeof ShopRouteWithChildren
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
   '/_guest/login': typeof GuestLoginRoute
   '/_protected/accounting': typeof ProtectedAccountingRoute
   '/_protected/audit': typeof ProtectedAuditRoute
+  '/_protected/dashboard': typeof ProtectedDashboardRoute
   '/_protected/inventory': typeof ProtectedInventoryRoute
   '/_protected/invoices': typeof ProtectedInvoicesRoute
   '/_protected/orders': typeof ProtectedOrdersRoute
@@ -279,6 +402,7 @@ export interface FileRoutesById {
   '/_protected/setup': typeof ProtectedSetupRoute
   '/_protected/shipments': typeof ProtectedShipmentsRoute
   '/_protected/users': typeof ProtectedUsersRoute
+<<<<<<< HEAD
   '/shop/cart': typeof ShopCartRoute
   '/shop/checkout': typeof ShopCheckoutRoute
   '/shop/interests': typeof ShopInterestsRoute
@@ -288,6 +412,21 @@ export interface FileRoutesById {
   '/shop/': typeof ShopIndexRoute
   '/shop/products/$productId': typeof ShopProductsProductIdRoute
   '/shop/products/': typeof ShopProductsIndexRoute
+=======
+  '/_shop/about': typeof ShopAboutRoute
+  '/_shop/cart': typeof ShopCartRoute
+  '/_shop/categories': typeof ShopCategoriesRoute
+  '/_shop/checkout': typeof ShopCheckoutRoute
+  '/_shop/contact': typeof ShopContactRoute
+  '/_shop/deals': typeof ShopDealsRoute
+  '/_shop/faq': typeof ShopFaqRoute
+  '/_shop/order-success': typeof ShopOrderSuccessRoute
+  '/_shop/wishlist': typeof ShopWishlistRoute
+  '/_shop/': typeof ShopIndexRoute
+  '/_shop/policies/$slug': typeof ShopPoliciesSlugRoute
+  '/_shop/shop/$productId': typeof ShopShopProductIdRoute
+  '/_shop/shop/': typeof ShopShopIndexRoute
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -298,6 +437,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/accounting'
     | '/audit'
+    | '/dashboard'
     | '/inventory'
     | '/invoices'
     | '/orders'
@@ -313,6 +453,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/shipments'
     | '/users'
+<<<<<<< HEAD
     | '/shop/cart'
     | '/shop/checkout'
     | '/shop/interests'
@@ -321,6 +462,20 @@ export interface FileRouteTypes {
     | '/shop/'
     | '/shop/products/$productId'
     | '/shop/products/'
+=======
+    | '/about'
+    | '/cart'
+    | '/categories'
+    | '/checkout'
+    | '/contact'
+    | '/deals'
+    | '/faq'
+    | '/order-success'
+    | '/wishlist'
+    | '/policies/$slug'
+    | '/shop/$productId'
+    | '/shop/'
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/$'
@@ -328,6 +483,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/accounting'
     | '/audit'
+    | '/dashboard'
     | '/inventory'
     | '/invoices'
     | '/orders'
@@ -343,6 +499,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/shipments'
     | '/users'
+<<<<<<< HEAD
     | '/shop/cart'
     | '/shop/checkout'
     | '/shop/interests'
@@ -350,15 +507,34 @@ export interface FileRouteTypes {
     | '/shop'
     | '/shop/products/$productId'
     | '/shop/products'
+=======
+    | '/about'
+    | '/cart'
+    | '/categories'
+    | '/checkout'
+    | '/contact'
+    | '/deals'
+    | '/faq'
+    | '/order-success'
+    | '/wishlist'
+    | '/policies/$slug'
+    | '/shop/$productId'
+    | '/shop'
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
   id:
     | '__root__'
     | '/$'
     | '/_guest'
     | '/_protected'
+<<<<<<< HEAD
     | '/shop'
+=======
+    | '/_shop'
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
     | '/_guest/login'
     | '/_protected/accounting'
     | '/_protected/audit'
+    | '/_protected/dashboard'
     | '/_protected/inventory'
     | '/_protected/invoices'
     | '/_protected/orders'
@@ -374,6 +550,7 @@ export interface FileRouteTypes {
     | '/_protected/setup'
     | '/_protected/shipments'
     | '/_protected/users'
+<<<<<<< HEAD
     | '/shop/cart'
     | '/shop/checkout'
     | '/shop/interests'
@@ -383,6 +560,21 @@ export interface FileRouteTypes {
     | '/shop/'
     | '/shop/products/$productId'
     | '/shop/products/'
+=======
+    | '/_shop/about'
+    | '/_shop/cart'
+    | '/_shop/categories'
+    | '/_shop/checkout'
+    | '/_shop/contact'
+    | '/_shop/deals'
+    | '/_shop/faq'
+    | '/_shop/order-success'
+    | '/_shop/wishlist'
+    | '/_shop/'
+    | '/_shop/policies/$slug'
+    | '/_shop/shop/$productId'
+    | '/_shop/shop/'
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -415,10 +607,17 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
     '/shop': {
       id: '/shop'
       path: '/shop'
       fullPath: '/shop'
+=======
+    '/_shop': {
+      id: '/_shop'
+      path: ''
+      fullPath: '/'
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
       preLoaderRoute: typeof ShopRouteImport
       parentRoute: typeof rootRouteImport
     }
@@ -428,13 +627,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/login'
       preLoaderRoute: typeof GuestLoginRouteImport
       parentRoute: typeof GuestRoute
-    }
-    '/_protected/': {
-      id: '/_protected/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof ProtectedIndexRouteImport
-      parentRoute: typeof ProtectedRoute
     }
     '/_protected/accounting': {
       id: '/_protected/accounting'
@@ -448,6 +640,13 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof ProtectedAuditRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
+    '/_protected/dashboard': {
+      id: '/_protected/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof ProtectedDashboardRouteImport
       parentRoute: typeof ProtectedRoute
     }
     '/_protected/inventory': {
@@ -555,6 +754,7 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedUsersRouteImport
       parentRoute: typeof ProtectedRoute
     }
+<<<<<<< HEAD
     '/shop/': {
       id: '/shop/'
       path: '/'
@@ -610,6 +810,98 @@ declare module '@tanstack/react-router' {
       fullPath: '/shop/products/$productId'
       preLoaderRoute: typeof ShopProductsProductIdRouteImport
       parentRoute: typeof ShopProductsRoute
+=======
+    '/_shop/': {
+      id: '/_shop/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof ShopIndexRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/about': {
+      id: '/_shop/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof ShopAboutRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/cart': {
+      id: '/_shop/cart'
+      path: '/cart'
+      fullPath: '/cart'
+      preLoaderRoute: typeof ShopCartRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/categories': {
+      id: '/_shop/categories'
+      path: '/categories'
+      fullPath: '/categories'
+      preLoaderRoute: typeof ShopCategoriesRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/checkout': {
+      id: '/_shop/checkout'
+      path: '/checkout'
+      fullPath: '/checkout'
+      preLoaderRoute: typeof ShopCheckoutRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/contact': {
+      id: '/_shop/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof ShopContactRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/deals': {
+      id: '/_shop/deals'
+      path: '/deals'
+      fullPath: '/deals'
+      preLoaderRoute: typeof ShopDealsRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/faq': {
+      id: '/_shop/faq'
+      path: '/faq'
+      fullPath: '/faq'
+      preLoaderRoute: typeof ShopFaqRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/order-success': {
+      id: '/_shop/order-success'
+      path: '/order-success'
+      fullPath: '/order-success'
+      preLoaderRoute: typeof ShopOrderSuccessRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/wishlist': {
+      id: '/_shop/wishlist'
+      path: '/wishlist'
+      fullPath: '/wishlist'
+      preLoaderRoute: typeof ShopWishlistRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/policies/$slug': {
+      id: '/_shop/policies/$slug'
+      path: '/policies/$slug'
+      fullPath: '/policies/$slug'
+      preLoaderRoute: typeof ShopPoliciesSlugRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/shop/': {
+      id: '/_shop/shop/'
+      path: '/shop'
+      fullPath: '/shop/'
+      preLoaderRoute: typeof ShopShopIndexRouteImport
+      parentRoute: typeof ShopRoute
+    }
+    '/_shop/shop/$productId': {
+      id: '/_shop/shop/$productId'
+      path: '/shop/$productId'
+      fullPath: '/shop/$productId'
+      preLoaderRoute: typeof ShopShopProductIdRouteImport
+      parentRoute: typeof ShopRoute
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
     }
   }
 }
@@ -627,6 +919,7 @@ const GuestRouteWithChildren = GuestRoute._addFileChildren(GuestRouteChildren)
 interface ProtectedRouteChildren {
   ProtectedAccountingRoute: typeof ProtectedAccountingRoute
   ProtectedAuditRoute: typeof ProtectedAuditRoute
+  ProtectedDashboardRoute: typeof ProtectedDashboardRoute
   ProtectedInventoryRoute: typeof ProtectedInventoryRoute
   ProtectedInvoicesRoute: typeof ProtectedInvoicesRoute
   ProtectedOrdersRoute: typeof ProtectedOrdersRoute
@@ -642,12 +935,12 @@ interface ProtectedRouteChildren {
   ProtectedSetupRoute: typeof ProtectedSetupRoute
   ProtectedShipmentsRoute: typeof ProtectedShipmentsRoute
   ProtectedUsersRoute: typeof ProtectedUsersRoute
-  ProtectedIndexRoute: typeof ProtectedIndexRoute
 }
 
 const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedAccountingRoute: ProtectedAccountingRoute,
   ProtectedAuditRoute: ProtectedAuditRoute,
+  ProtectedDashboardRoute: ProtectedDashboardRoute,
   ProtectedInventoryRoute: ProtectedInventoryRoute,
   ProtectedInvoicesRoute: ProtectedInvoicesRoute,
   ProtectedOrdersRoute: ProtectedOrdersRoute,
@@ -663,13 +956,13 @@ const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedSetupRoute: ProtectedSetupRoute,
   ProtectedShipmentsRoute: ProtectedShipmentsRoute,
   ProtectedUsersRoute: ProtectedUsersRoute,
-  ProtectedIndexRoute: ProtectedIndexRoute,
 }
 
 const ProtectedRouteWithChildren = ProtectedRoute._addFileChildren(
   ProtectedRouteChildren,
 )
 
+<<<<<<< HEAD
 interface ShopProductsRouteChildren {
   ShopProductsProductIdRoute: typeof ShopProductsProductIdRoute
   ShopProductsIndexRoute: typeof ShopProductsIndexRoute
@@ -700,6 +993,38 @@ const ShopRouteChildren: ShopRouteChildren = {
   ShopOrdersRoute: ShopOrdersRoute,
   ShopProductsRoute: ShopProductsRouteWithChildren,
   ShopIndexRoute: ShopIndexRoute,
+=======
+interface ShopRouteChildren {
+  ShopAboutRoute: typeof ShopAboutRoute
+  ShopCartRoute: typeof ShopCartRoute
+  ShopCategoriesRoute: typeof ShopCategoriesRoute
+  ShopCheckoutRoute: typeof ShopCheckoutRoute
+  ShopContactRoute: typeof ShopContactRoute
+  ShopDealsRoute: typeof ShopDealsRoute
+  ShopFaqRoute: typeof ShopFaqRoute
+  ShopOrderSuccessRoute: typeof ShopOrderSuccessRoute
+  ShopWishlistRoute: typeof ShopWishlistRoute
+  ShopIndexRoute: typeof ShopIndexRoute
+  ShopPoliciesSlugRoute: typeof ShopPoliciesSlugRoute
+  ShopShopProductIdRoute: typeof ShopShopProductIdRoute
+  ShopShopIndexRoute: typeof ShopShopIndexRoute
+}
+
+const ShopRouteChildren: ShopRouteChildren = {
+  ShopAboutRoute: ShopAboutRoute,
+  ShopCartRoute: ShopCartRoute,
+  ShopCategoriesRoute: ShopCategoriesRoute,
+  ShopCheckoutRoute: ShopCheckoutRoute,
+  ShopContactRoute: ShopContactRoute,
+  ShopDealsRoute: ShopDealsRoute,
+  ShopFaqRoute: ShopFaqRoute,
+  ShopOrderSuccessRoute: ShopOrderSuccessRoute,
+  ShopWishlistRoute: ShopWishlistRoute,
+  ShopIndexRoute: ShopIndexRoute,
+  ShopPoliciesSlugRoute: ShopPoliciesSlugRoute,
+  ShopShopProductIdRoute: ShopShopProductIdRoute,
+  ShopShopIndexRoute: ShopShopIndexRoute,
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 }
 
 const ShopRouteWithChildren = ShopRoute._addFileChildren(ShopRouteChildren)

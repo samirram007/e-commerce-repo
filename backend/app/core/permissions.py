@@ -42,6 +42,8 @@ P_COMPANY_SETTINGS = "company.settings.manage"
 P_MEMBERS_MANAGE = "company.members.manage"
 P_FILES_UPLOAD = "files.upload"
 P_CART_CHECKOUT = "storefront.cart.use"
+P_STOREFRONT_VIEW = "storefront.view"
+P_STOREFRONT_MANAGE = "storefront.manage"
 P_PAYROLL_MANAGE = "payroll.manage"
 P_PAYROLL_VIEW = "payroll.view"
 
@@ -75,6 +77,8 @@ ALL_PERMISSIONS: dict[str, str] = {
     P_MEMBERS_MANAGE: "Manage company members",
     P_FILES_UPLOAD: "Upload files",
     P_CART_CHECKOUT: "Use storefront cart/checkout",
+    P_STOREFRONT_VIEW: "View storefront content",
+    P_STOREFRONT_MANAGE: "Manage storefront content and media",
     P_PAYROLL_MANAGE: "Manage employees and payroll runs",
     P_PAYROLL_VIEW: "View payroll and payslips",
 }
@@ -87,15 +91,15 @@ COMPANY_PERMISSIONS: list[str] = [
     P_SALES_ORDER_CREATE, P_SALES_VIEW, P_SALES_FULFILL, P_PURCHASE_CREATE,
     P_PURCHASE_APPROVE, P_PURCHASE_VIEW, P_BILL_MANAGE, P_INVENTORY_MANAGE,
     P_INVENTORY_VIEW, P_INVOICES_MANAGE, P_INVOICES_VIEW, P_PAYMENTS_MANAGE,
-    P_PAYMENTS_VIEW, P_RETURNS_MANAGE, P_STORAGE_MANAGE, P_COMPANY_SETTINGS,
-    P_MEMBERS_MANAGE, P_FILES_UPLOAD, P_CART_CHECKOUT,
-    P_PAYROLL_MANAGE, P_PAYROLL_VIEW,
+    P_PAYMENTS_VIEW, P_RETURNS_MANAGE, P_STORAGE_MANAGE,    P_COMPANY_SETTINGS, P_MEMBERS_MANAGE, P_FILES_UPLOAD, P_CART_CHECKOUT,
+    P_PAYROLL_MANAGE, P_PAYROLL_VIEW, P_STOREFRONT_VIEW, P_STOREFRONT_MANAGE,
 ]
 
 # Read-only subset used by the "Other User" tier.
 READ_ONLY_PERMISSIONS: list[str] = [
     P_CATALOG_VIEW, P_INVENTORY_VIEW, P_SALES_VIEW, P_PURCHASE_VIEW,
     P_INVOICES_VIEW, P_PAYMENTS_VIEW, P_REPORTS_VIEW, P_PAYROLL_VIEW,
+    P_STOREFRONT_VIEW,
 ]
 
 # Assignable user tiers (Developer / Admin / Other User).
@@ -139,7 +143,7 @@ ROLE_TEMPLATES: dict[str, list[str]] = {
     ],
     "sales_agent": [
         P_CATALOG_VIEW, P_CART_CHECKOUT, P_SALES_ORDER_CREATE, P_SALES_VIEW,
-        P_PARTNERS_MANAGE, P_SALES_FULFILL,
+        P_PARTNERS_MANAGE, P_SALES_FULFILL, P_STOREFRONT_VIEW,
     ],
     "purchasing_agent": [
         P_CATALOG_VIEW, P_PURCHASE_CREATE, P_PURCHASE_VIEW, P_BILL_MANAGE, P_PARTNERS_MANAGE,

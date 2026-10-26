@@ -29,6 +29,9 @@ ALLOWED_CONTENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
 }
 
+#: Content types accepted for storefront imagery (product/category/hero photos).
+IMAGE_CONTENT_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+
 
 class StoredFile(Base, TimestampMixin, CreatedByMixin):
     __tablename__ = "files"
@@ -57,7 +60,10 @@ def save_file(
     purpose: str = "generic",
     created_by: str | None = None,
     allowed_types: set[str] | None = None,
+    visibility: str = "private",
 ) -> StoredFile:
+    if visibility not in {"private", "public"}:
+        raise BusinessRuleError("BAD_FILE_VISIBILITY", "visibility must be 'private' or 'public'")
     settings = get_settings()
     allowed = allowed_types or ALLOWED_CONTENT_TYPES
     content_type = upload.content_type or "application/octet-stream"
@@ -91,7 +97,7 @@ def save_file(
         original_name=upload.filename or "upload",
         content_type=content_type,
         size_bytes=size,
-        visibility="private",
+        visibility=visibility,
         purpose=purpose,
         created_by=created_by,
     )
@@ -106,6 +112,22 @@ def open_file(session: Session, file_id: str, *, company_id: str | None) -> tupl
         raise NotFoundError("File")
     if record.visibility == "private" and record.company_id != company_id:
         raise NotFoundError("File")  # do not reveal existence across tenants
+    path = _media_root() / record.storage_key
+    if not path.is_file():
+        raise NotFoundError("File contents")
+    return record, path
+
+
+def open_public_file(session: Session, file_id: str, *, company_id: str | None) -> tuple[StoredFile, Path]:
+    """Open a file for the headerless public image route.
+
+    Only files explicitly saved with `visibility="public"` and belonging to the
+    company named in the URL are served; everything else (including cross-tenant
+    existence) is a 404 so private documents are never revealed.
+    """
+    record = session.get(StoredFile, file_id)
+    if record is None or record.visibility != "public" or record.company_id != company_id:
+        raise NotFoundError("File")
     path = _media_root() / record.storage_key
     if not path.is_file():
         raise NotFoundError("File contents")

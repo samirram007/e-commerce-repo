@@ -1,11 +1,16 @@
 """Storefront service: guest-safe catalog browsing, trending, product
 interests (favorites/watchlist), delivery-zone (pincode) checks and the
-anonymous token cart."""
+anonymous token cart — plus the public shop content (hero, testimonials,
+FAQ, policies, settings)."""
 import hashlib
 import re
 from datetime import date
+<<<<<<< HEAD
 from decimal import Decimal
 from xml.sax.saxutils import escape as xml_escape
+=======
+from decimal import ROUND_DOWN, Decimal
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -15,14 +20,27 @@ from app.modules.catalog.models import (
     Category,
     DeliveryZone,
     Product,
+    ProductImage,
     ProductInterest,
 )
 from app.modules.companies.models import Company
 from app.modules.partners.models import Customer
 from app.modules.sales import service as sales_svc
 from app.modules.sales.models import Cart, SalesOrder
+<<<<<<< HEAD
 from app.modules.storefront.models import StorefrontAddress
 from app.shared.money import dec, money
+=======
+from app.modules.storefront.models import (
+    StorefrontAddress,
+    StorefrontFaq,
+    StorefrontHeroSlide,
+    StorefrontPolicy,
+    StorefrontSettings,
+    StorefrontTestimonial,
+)
+from app.shared.money import dec
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 
 INTEREST_KINDS = {"favorite", "watchlist"}
 
@@ -32,22 +50,73 @@ MOCK_PAYMENT_METHODS = [
     {"code": "upi", "label": "UPI (sandbox)", "provider": "mock"},
 ]
 
+<<<<<<< HEAD
 COD_METHOD = {"code": "cod", "label": "Cash on delivery", "provider": "cash"}
 
 #: Every method code the checkout may submit.
 PAYMENT_METHOD_CODES = {"card", "upi", "cod", "razorpay"}
 
+=======
+#: Absolute-path prefix for the headerless public image route.
+MEDIA_PREFIX = "/api/v1/storefront/shop/media"
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 
-def _product_brief(p: Product) -> dict:
+
+def media_url(company_id: str, file_id: str | None) -> str | None:
+    """Public URL for a stored file (None when there is no file)."""
+    if not file_id:
+        return None
+    return f"{MEDIA_PREFIX}/{company_id}/{file_id}"
+
+
+def discount_percent(price, compare_at) -> int | None:
+    """Server-computed saving percentage (rounded down), or None."""
+    if compare_at is None:
+        return None
+    was = dec(compare_at)
+    now = dec(price)
+    if was <= 0 or was <= now:
+        return None
+    return int(((was - now) / was * 100).to_integral_value(rounding=ROUND_DOWN))
+
+
+def _product_images(p: Product, session: Session, categories: dict | None = None) -> dict:
+    """Serializer for cards/lists. Cover image first, then the gallery."""
+    gallery = session.execute(
+        select(ProductImage)
+        .where(ProductImage.product_id == p.id)
+        .order_by(ProductImage.sort_order, ProductImage.created_at)
+    ).scalars().all()
+    images: list[dict] = []
+    cover = media_url(p.company_id, p.image_file_id)
+    if cover:
+        images.append({"id": None, "url": cover, "alt": p.name})
+    for row in gallery:
+        if row.file_id == p.image_file_id:
+            continue
+        images.append({"id": row.id, "url": media_url(p.company_id, row.file_id), "alt": row.alt})
+    category = categories.get(p.category_id) if categories and p.category_id else None
+    if categories is not None and p.category_id and category is None:
+        category = session.get(Category, p.category_id)
     return {
         "id": p.id,
         "sku": p.sku,
         "name": p.name,
         "description": p.description,
         "category_id": p.category_id,
+        "category_name": category.name if category else None,
+        "category_slug": category.slug if category else None,
         "price": str(p.base_price),
+        "compare_at_price": str(p.compare_at_price) if p.compare_at_price is not None else None,
+        "discount_percent": discount_percent(p.base_price, p.compare_at_price),
+        "badge": p.badge,
+        "rating_avg": str(p.rating_avg) if p.rating_avg is not None else None,
+        "rating_count": p.rating_count,
+        "tone": p.tone,
+        "slug": p.slug,
         "stock_type": p.stock_type,
         "view_count": p.view_count,
+<<<<<<< HEAD
         "image_url": product_image_url(p.id),
     }
 
@@ -68,6 +137,60 @@ def list_categories(session: Session, company_id: str) -> list[dict]:
     ).scalars().all()
     own: dict[str, int] = {}
     for category_id, count in session.execute(
+=======
+        "image_url": cover,
+        "images": images,
+    }
+
+
+def _product_brief(p: Product, session: Session, categories: dict | None = None) -> dict:
+    return _product_images(p, session, categories)
+
+
+def _category_map(session: Session, company_id: str) -> dict[str, Category]:
+    rows = session.execute(
+        select(Category).where(Category.company_id == company_id)
+    ).scalars().all()
+    return {c.id: c for c in rows}
+
+
+def _available_qty(session: Session, company_id: str, product: Product) -> str | None:
+    """Live stock from the inventory module (never a product column)."""
+    if product.stock_type != "stock":
+        return None
+    from app.modules.inventory.models import StockOnHand
+    from app.modules.inventory.service import available_qty as on_hand_available
+
+    total = Decimal("0")
+    rows = session.execute(
+        select(StockOnHand).where(
+            StockOnHand.company_id == company_id, StockOnHand.product_id == product.id
+        )
+    ).scalars().all()
+    for row in rows:
+        total += on_hand_available(row)
+    return str(total)
+
+
+# ---- catalog browse ----
+def _category_out(session: Session, c: Category, counts: dict) -> dict:
+    return {
+        "id": c.id,
+        "name": c.name,
+        "slug": c.slug,
+        "blurb": c.blurb,
+        "tone": c.tone,
+        "image_url": media_url(c.company_id, c.image_file_id),
+        "parent_id": c.parent_id,
+        "product_count": counts.get(c.id, 0) + counts.get(None, 0) if c.parent_id is None else counts.get(c.id, 0),
+        "sort_order": c.sort_order,
+    }
+
+
+def _category_counts(session: Session, company_id: str) -> dict:
+    counts: dict[str | None, int] = {}
+    for p in session.execute(
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
         select(Product.category_id, func.count())
         .where(
             Product.company_id == company_id,
@@ -76,6 +199,7 @@ def list_categories(session: Session, company_id: str) -> list[dict]:
         )
         .group_by(Product.category_id)
     ).all():
+<<<<<<< HEAD
         if category_id:
             own[category_id] = count
 
@@ -101,6 +225,21 @@ def list_categories(session: Session, company_id: str) -> list[dict]:
         }
         for c in cats
     ]
+=======
+        counts[p[0]] = p[1]
+    return counts
+
+
+def list_categories(session: Session, company_id: str, *, slug: str | None = None) -> list[dict]:
+    stmt = select(Category).where(
+        Category.company_id == company_id, Category.is_active.is_(True)
+    )
+    if slug:
+        stmt = stmt.where(Category.slug == slug.strip().lower())
+    cats = session.execute(stmt.order_by(Category.sort_order, Category.name)).scalars().all()
+    counts = _category_counts(session, company_id)
+    return [_category_out(session, c, counts) for c in cats]
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 
 
 def _category_scope(session: Session, company_id: str, category_id: str) -> list[str]:
@@ -131,13 +270,16 @@ def list_products(
     company_id: str,
     *,
     q: str | None = None,
-    category_id: str | None = None,
+    category: str | None = None,
     min_price: Decimal | None = None,
     max_price: Decimal | None = None,
+    on_sale: bool = False,
+    badge: str | None = None,
     sort: str = "popular",
     limit: int = 24,
     offset: int = 0,
 ) -> dict:
+    """Paginated product listing. `category` accepts a category id OR slug."""
     stmt = select(Product).where(
         Product.company_id == company_id,
         Product.is_active.is_(True),
@@ -146,19 +288,40 @@ def list_products(
     if q:
         like = f"%{q.lower()}%"
         stmt = stmt.where((Product.name.ilike(like)) | (Product.sku.ilike(like)) | (Product.barcode.ilike(like)))
-    if category_id:
-        stmt = stmt.where(Product.category_id.in_(_category_scope(session, company_id, category_id)))
+    if category:
+        row = session.get(Category, category)
+        if row is None or row.company_id != company_id:
+            row = session.scalar(
+                select(Category).where(
+                    Category.company_id == company_id, Category.slug == category.strip().lower()
+                )
+            )
+        if row is None:
+            raise NotFoundError("Category")
+        stmt = stmt.where(Product.category_id.in_(_category_scope(session, company_id, row.id)))
     if min_price is not None:
         stmt = stmt.where(Product.base_price >= min_price)
     if max_price is not None:
         stmt = stmt.where(Product.base_price <= max_price)
+    if on_sale:
+        stmt = stmt.where(
+            Product.compare_at_price.isnot(None), Product.compare_at_price > Product.base_price
+        )
+    if badge:
+        stmt = stmt.where(Product.badge == badge)
     order = SORTS.get(sort, SORTS["popular"])
     stmt = stmt.order_by(*order)
     total = session.scalar(
         select(func.count()).select_from(stmt.order_by(None).subquery())
     ) or 0
     rows = session.execute(stmt.limit(limit).offset(offset)).scalars().all()
-    return {"items": [_product_brief(r) for r in rows], "total": total}
+    categories = _category_map(session, company_id)
+    return {
+        "items": [_product_brief(r, session, categories) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def trending(session: Session, company_id: str, limit: int = 8) -> list[dict]:
@@ -173,7 +336,8 @@ def trending(session: Session, company_id: str, limit: int = 8) -> list[dict]:
         .order_by(Product.view_count.desc())
         .limit(limit)
     ).scalars().all()
-    return [_product_brief(r) for r in rows]
+    categories = _category_map(session, company_id)
+    return [_product_brief(r, session, categories) for r in rows]
 
 
 #: Emoji hint per category (lower-cased name) for the generated image tile.
@@ -270,10 +434,18 @@ def product_detail(session: Session, company_id: str, product_id: str, *, count_
         .order_by(Product.view_count.desc())
         .limit(8)
     ).scalars().all()
+    categories = _category_map(session, company_id)
     return {
+<<<<<<< HEAD
         **result,
+=======
+        **_product_brief(product, session, categories),
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
         "category_name": category.name if category else None,
-        "related": [_product_brief(r) for r in related],
+        "highlights": list(product.highlights or []),
+        "colors": list(product.colors or []),
+        "available_qty": _available_qty(session, company_id, product),
+        "related": [_product_brief(r, session, categories) for r in related],
     }
 
 
@@ -308,6 +480,7 @@ def list_interests(
     session: Session, company_id: str, *, user_id: str | None, anon_id: str | None
 ) -> dict:
     out = {"favorite": [], "watchlist": []}
+    categories = _category_map(session, company_id)
     for kind in INTEREST_KINDS:
         rows = session.execute(
             select(ProductInterest).where(
@@ -319,7 +492,7 @@ def list_interests(
         for row in rows:
             product = session.get(Product, row.product_id)
             if product is not None and product.is_active and product.is_sellable:
-                out[kind].append(_product_brief(product))
+                out[kind].append(_product_brief(product, session, categories))
     return out
 
 
@@ -540,6 +713,7 @@ def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
         unit_price = line.get("unit_price") or (str(product.base_price) if product else "0")
         items.append(
             {
+<<<<<<< HEAD
                 "id": row.id,
                 "product_id": row.product_id,
                 "qty": str(row.qty),
@@ -551,9 +725,220 @@ def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
                 "line_total": line.get("line_total", "0"),
                 "stock_type": product.stock_type if product else "stock",
                 "image_url": product_image_url(product.id) if product else None,
+=======
+                "id": i.id,
+                "product_id": i.product_id,
+                "qty": str(i.qty),
+                "name": products[i.product_id].name if i.product_id in products else "Item",
+                "sku": products[i.product_id].sku if i.product_id in products else "",
+                "price": str(products[i.product_id].base_price) if i.product_id in products else "0",
+                "image_url": media_url(company_id, products[i.product_id].image_file_id) if i.product_id in products else None,
+                "tone": products[i.product_id].tone if i.product_id in products else None,
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
             }
         )
     return {"id": cart.id, "status": cart.status, "token": token, "items": items, "quote": quote}
+
+
+# ---- public shop content (hero, testimonials, FAQ, policies, settings) ----
+def _hero_out(s: StorefrontHeroSlide) -> dict:
+    return {
+        "id": s.id,
+        "eyebrow": s.eyebrow,
+        "title": s.title,
+        "text": s.text,
+        "cta": s.cta,
+        "category_slug": s.category_slug,
+        "tone": s.tone,
+        "image_url": media_url(s.company_id, s.image_file_id),
+    }
+
+
+def _testimonial_out(t: StorefrontTestimonial) -> dict:
+    return {"id": t.id, "name": t.name, "city": t.city, "text": t.quote}
+
+
+def list_hero_slides(session: Session, company_id: str) -> list[dict]:
+    rows = session.execute(
+        select(StorefrontHeroSlide)
+        .where(
+            StorefrontHeroSlide.company_id == company_id,
+            StorefrontHeroSlide.is_active.is_(True),
+        )
+        .order_by(StorefrontHeroSlide.sort_order, StorefrontHeroSlide.created_at)
+    ).scalars().all()
+    return [_hero_out(row) for row in rows]
+
+
+def list_testimonials(session: Session, company_id: str) -> list[dict]:
+    rows = session.execute(
+        select(StorefrontTestimonial)
+        .where(
+            StorefrontTestimonial.company_id == company_id,
+            StorefrontTestimonial.is_active.is_(True),
+        )
+        .order_by(StorefrontTestimonial.sort_order, StorefrontTestimonial.created_at)
+    ).scalars().all()
+    return [_testimonial_out(row) for row in rows]
+
+
+def list_faqs(session: Session, company_id: str) -> list[dict]:
+    rows = session.execute(
+        select(StorefrontFaq)
+        .where(
+            StorefrontFaq.company_id == company_id,
+            StorefrontFaq.is_active.is_(True),
+        )
+        .order_by(StorefrontFaq.group_name, StorefrontFaq.sort_order, StorefrontFaq.created_at)
+    ).scalars().all()
+    return [
+        {"id": row.id, "group": row.group_name, "question": row.question, "answer": row.answer}
+        for row in rows
+    ]
+
+
+def _policy_out(p: StorefrontPolicy, *, with_sections: bool) -> dict:
+    out = {"slug": p.slug, "title": p.title, "updated": p.updated}
+    if with_sections:
+        out["sections"] = list(p.sections or [])
+    return out
+
+
+def list_policies(session: Session, company_id: str) -> list[dict]:
+    rows = session.execute(
+        select(StorefrontPolicy)
+        .where(
+            StorefrontPolicy.company_id == company_id,
+            StorefrontPolicy.is_active.is_(True),
+        )
+        .order_by(StorefrontPolicy.sort_order, StorefrontPolicy.title)
+    ).scalars().all()
+    return [_policy_out(row, with_sections=False) for row in rows]
+
+
+def get_policy(session: Session, company_id: str, slug: str) -> dict:
+    row = session.scalar(
+        select(StorefrontPolicy).where(
+            StorefrontPolicy.company_id == company_id,
+            StorefrontPolicy.slug == slug.strip().lower(),
+            StorefrontPolicy.is_active.is_(True),
+        )
+    )
+    if row is None:
+        raise NotFoundError("Policy")
+    return _policy_out(row, with_sections=True)
+
+
+def get_settings_row(session: Session, company_id: str) -> StorefrontSettings | None:
+    return session.scalar(
+        select(StorefrontSettings).where(StorefrontSettings.company_id == company_id)
+    )
+
+
+def settings_out(row: StorefrontSettings | None, company_id: str) -> dict:
+    """Store settings as the public shop consumes them (money as strings)."""
+    if row is None:
+        return {
+            "free_shipping_threshold": None,
+            "flat_shipping_fee": None,
+            "contact_phone": None,
+            "contact_email": None,
+            "contact_address": None,
+            "map_image_url": None,
+            "announcements": [],
+            "perks": [],
+            "about_values": [],
+            "about_stats": [],
+            "footer_about": None,
+        }
+    return {
+        "free_shipping_threshold": str(row.free_shipping_threshold) if row.free_shipping_threshold is not None else None,
+        "flat_shipping_fee": str(row.flat_shipping_fee) if row.flat_shipping_fee is not None else None,
+        "contact_phone": row.contact_phone,
+        "contact_email": row.contact_email,
+        "contact_address": row.contact_address,
+        "map_image_url": media_url(company_id, row.map_image_file_id),
+        "announcements": list(row.announcements or []),
+        "perks": list(row.perks or []),
+        "about_values": list(row.about_values or []),
+        "about_stats": list(row.about_stats or []),
+        "footer_about": row.footer_about,
+    }
+
+
+def compute_shipping(session: Session, company_id: str, subtotal) -> Decimal:
+    """Authoritative shipping quote from the store settings.
+
+    Free when no rules are configured, free above the threshold, otherwise the
+    flat fee.
+    """
+    settings = get_settings_row(session, company_id)
+    if settings is None:
+        return Decimal("0")
+    subtotal = dec(subtotal)
+    threshold = (
+        dec(settings.free_shipping_threshold)
+        if settings.free_shipping_threshold is not None
+        else None
+    )
+    if threshold is not None and subtotal >= threshold:
+        return Decimal("0")
+    if settings.flat_shipping_fee is None:
+        return Decimal("0")
+    return dec(settings.flat_shipping_fee)
+
+
+def home(session: Session, company_id: str) -> dict:
+    """One call that feeds the whole home page."""
+    categories = list_categories(session, company_id)
+    bestsellers = session.execute(
+        select(Product)
+        .where(
+            Product.company_id == company_id,
+            Product.is_active.is_(True),
+            Product.is_sellable.is_(True),
+            Product.rating_count > 0,
+        )
+        .order_by(Product.rating_count.desc(), Product.name.asc())
+        .limit(10)
+    ).scalars().all()
+    new_arrivals = session.execute(
+        select(Product)
+        .where(
+            Product.company_id == company_id,
+            Product.is_active.is_(True),
+            Product.is_sellable.is_(True),
+            Product.badge == "New",
+        )
+        .order_by(Product.created_at.desc(), Product.name.asc())
+        .limit(8)
+    ).scalars().all()
+    sale_rows = session.execute(
+        select(Product)
+        .where(
+            Product.company_id == company_id,
+            Product.is_active.is_(True),
+            Product.is_sellable.is_(True),
+            Product.compare_at_price.isnot(None),
+            Product.compare_at_price > Product.base_price,
+        )
+        .order_by(Product.view_count.desc())
+        .limit(24)
+    ).scalars().all()
+    category_map = _category_map(session, company_id)
+    deal = None
+    for candidate in sale_rows:
+        off = discount_percent(candidate.base_price, candidate.compare_at_price)
+        if off is not None and (deal is None or off > deal[0]):
+            deal = (off, candidate)
+    return {
+        "hero": list_hero_slides(session, company_id),
+        "categories": categories,
+        "bestsellers": [_product_brief(p, session, category_map) for p in bestsellers],
+        "new_arrivals": [_product_brief(p, session, category_map) for p in new_arrivals],
+        "deal": _product_brief(deal[1], session, category_map) if deal else None,
+        "testimonials": list_testimonials(session, company_id),
+    }
 
 
 # ---- store info (public storefront bootstrap) ----
@@ -580,6 +965,7 @@ def store_info(session: Session, slug: str) -> dict:
         "name": company.name,
         "currency": company.base_currency,
         "allow_guest_checkout": company.allow_guest_checkout,
+        "settings": settings_out(get_settings_row(session, company.id), company.id),
     }
 
 
@@ -838,6 +1224,13 @@ def guest_checkout(
         raise BusinessRuleError("EMAIL_REQUIRED", "An email address is required to place the order")
 
     address_text = _format_address(address)
+    if get_settings_row(session, company_id) is not None:
+        # The store's shipping rules are authoritative; ignore any client value.
+        shipping_total = compute_shipping(
+            session, company_id, sales_svc.quote_cart(session, cart)["subtotal"]
+        )
+    else:
+        shipping_total = dec(payload.get("shipping_total") or "0")
     order, replayed = sales_svc.checkout_cart(
         session,
         company_id=company_id,
@@ -846,7 +1239,7 @@ def guest_checkout(
         customer_id=customer.id,
         shipping_address=address_text,
         billing_address=address_text,
-        shipping_total=dec(payload.get("shipping_total") or "0"),
+        shipping_total=shipping_total,
         notes=payload.get("notes") or ("Cash on delivery" if method == "cod" else None),
         idempotency_key=idempotency_key,
     )

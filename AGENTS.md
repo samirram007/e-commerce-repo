@@ -15,7 +15,9 @@ repo-specific facts that are easy to get wrong.
 Backend (run from `backend/`):
 
 - `uv sync` — install deps (`.venv/` already present).
-- `uv run pytest` — all tests. Uses a throwaway **SQLite** DB; no Postgres/Redis needed.
+
+* [ ] - 
+
 - `uv run pytest tests/test_accounting_invariants.py::test_unbalanced_journal_rejected` — single test.
 - `uv run alembic upgrade head` — migrate (reads `DATABASE_URL`; `ALEMBIC_DATABASE_URL` overrides).
 - `uv run alembic revision --autogenerate -m "..."` — new revision.
@@ -95,3 +97,4 @@ Frontend (run from `frontend/`) — **pnpm only** (npm/yarn are blocked by the
   `window.location.reload()` to avoid stale cross-company cache.
 - Requests are relative; `VITE_API_URL` in `docker-compose.yml` is **not** read by the code
   (dev traffic goes through the Vite proxy).
+

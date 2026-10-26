@@ -46,7 +46,11 @@ export function LoginPage() {
         return;
       }
       setPending(false);
+<<<<<<< HEAD
       navigate({ href: safeRedirect(redirect) });
+=======
+      navigate({ to: "/dashboard" });
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
       return;
     }
 
@@ -65,7 +69,11 @@ export function LoginPage() {
       return;
     }
     setPending(false);
+<<<<<<< HEAD
     navigate({ href: safeRedirect(redirect) });
+=======
+    navigate({ to: "/dashboard" });
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
   }
 
   return (

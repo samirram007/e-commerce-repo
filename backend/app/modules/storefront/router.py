@@ -7,15 +7,23 @@ still requires a signed-in customer (existing /storefront/checkout).
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Header, Request, Response
+<<<<<<< HEAD
+=======
+from fastapi.responses import FileResponse
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AuthError, BusinessRuleError, NotFoundError
 from app.core.security import decode_token
 from app.db.unit_of_work import get_db
+<<<<<<< HEAD
 from app.modules.catalog.models import Product
 from app.modules.identity.models import User
+=======
+>>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 from app.modules.storefront import service as svc
+from app.shared.files import open_file, open_public_file, StoredFile
 
 router = APIRouter(prefix="/storefront/shop")
 
@@ -63,8 +71,12 @@ def _to_decimal(value: str | None) -> Decimal | None:
 
 # ---- catalog ----
 @router.get("/categories")
-def categories(ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
-    return svc.list_categories(session, ctx.company_id)
+def categories(
+    slug: str | None = None,
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    return svc.list_categories(session, ctx.company_id, slug=slug)
 
 
 @router.get("/products")
@@ -73,6 +85,8 @@ def products(
     category: str | None = None,
     min_price: str | None = None,
     max_price: str | None = None,
+    on_sale: bool = False,
+    badge: str | None = None,
     sort: str = "popular",
     limit: int = 24,
     offset: int = 0,
@@ -85,9 +99,11 @@ def products(
         session,
         ctx.company_id,
         q=q,
-        category_id=category,
+        category=category,
         min_price=_to_decimal(min_price),
         max_price=_to_decimal(max_price),
+        on_sale=on_sale,
+        badge=badge,
         sort=sort,
         limit=limit,
         offset=offset,
@@ -128,6 +144,30 @@ def product_image(product_id: str, session: Session = Depends(get_db)):
 @router.get("/trending")
 def trending(limit: int = 8, ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
     return svc.trending(session, ctx.company_id, limit=max(1, min(limit, 24)))
+
+
+# ---- home page bundle ----
+@router.get("/home")
+def home(ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
+    """Hero slides, featured categories, bestsellers/new arrivals, the deal
+    of the day and testimonials — everything the home page renders."""
+    return svc.home(session, ctx.company_id)
+
+
+# ---- public info content ----
+@router.get("/faqs")
+def faqs(ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
+    return svc.list_faqs(session, ctx.company_id)
+
+
+@router.get("/policies")
+def policies(ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
+    return svc.list_policies(session, ctx.company_id)
+
+
+@router.get("/policies/{slug}")
+def policy(slug: str, ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
+    return svc.get_policy(session, ctx.company_id, slug)
 
 
 # ---- interests ----
@@ -254,6 +294,40 @@ def guest_cart_clear(
     session.flush()
     return svc.guest_cart_out(session, ctx.company_id, token)
 
+
+# ---- file serving ----
+@router.get("/files/{file_id}")
+def serve_file(file_id: str, ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
+    """Serve a stored file to a company-scoped caller (invoices, receipts,
+    private docs). Public storefront imagery goes through `/media/...` instead."""
+    record, path = open_file(session, file_id, company_id=ctx.company_id)
+    return FileResponse(path=path, media_type=record.content_type)
+
+
+#: Storefront images are content-hashed by server-side key; cache hard.
+MEDIA_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+@router.get("/media/{company_id}/{file_id}")
+def public_media(
+    company_id: str,
+    file_id: str,
+    request: Request,
+    session: Session = Depends(get_db),
+):
+    """Public storefront image route: no headers, no auth.
+
+    Serves only files saved with `visibility="public"` for the company in the
+    path (the same id every shop request is scoped to); private files and
+    cross-tenant lookups return 404. Sends an ETag and long-lived Cache-Control
+    so browsers/CDNs can cache immutable, key-versioned URLs safely.
+    """
+    record, path = open_public_file(session, file_id, company_id=company_id)
+    etag = f'"{record.id}-{record.size_bytes}"'
+    headers = {"ETag": etag, "Cache-Control": MEDIA_CACHE_CONTROL}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return FileResponse(path=path, media_type=record.content_type, headers=headers)
 
 # ---- store info (public bootstrap: resolves the shop by slug) ----
 @router.get("/store/{slug}")
