@@ -10,11 +10,7 @@ export const Route = createFileRoute("/_guest")({
   beforeLoad: async () => {
     const ok = await ensureSession();
     if (ok) {
-<<<<<<< HEAD
-      throw redirect({ to: "/shop" });
-=======
       throw redirect({ to: "/dashboard" });
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
     }
   },
   component: GuestLayout,

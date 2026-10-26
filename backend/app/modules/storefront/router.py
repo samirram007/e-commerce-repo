@@ -7,21 +7,14 @@ still requires a signed-in customer (existing /storefront/checkout).
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Header, Request, Response
-<<<<<<< HEAD
-=======
 from fastapi.responses import FileResponse
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AuthError, BusinessRuleError, NotFoundError
 from app.core.security import decode_token
 from app.db.unit_of_work import get_db
-<<<<<<< HEAD
 from app.modules.catalog.models import Product
-from app.modules.identity.models import User
-=======
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 from app.modules.storefront import service as svc
 from app.shared.files import open_file, open_public_file, StoredFile
 

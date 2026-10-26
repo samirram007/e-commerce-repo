@@ -5,12 +5,8 @@ FAQ, policies, settings)."""
 import hashlib
 import re
 from datetime import date
-<<<<<<< HEAD
-from decimal import Decimal
-from xml.sax.saxutils import escape as xml_escape
-=======
 from decimal import ROUND_DOWN, Decimal
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
+from xml.sax.saxutils import escape as xml_escape
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -27,10 +23,6 @@ from app.modules.companies.models import Company
 from app.modules.partners.models import Customer
 from app.modules.sales import service as sales_svc
 from app.modules.sales.models import Cart, SalesOrder
-<<<<<<< HEAD
-from app.modules.storefront.models import StorefrontAddress
-from app.shared.money import dec, money
-=======
 from app.modules.storefront.models import (
     StorefrontAddress,
     StorefrontFaq,
@@ -39,8 +31,7 @@ from app.modules.storefront.models import (
     StorefrontSettings,
     StorefrontTestimonial,
 )
-from app.shared.money import dec
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
+from app.shared.money import dec, money
 
 INTEREST_KINDS = {"favorite", "watchlist"}
 
@@ -50,16 +41,13 @@ MOCK_PAYMENT_METHODS = [
     {"code": "upi", "label": "UPI (sandbox)", "provider": "mock"},
 ]
 
-<<<<<<< HEAD
 COD_METHOD = {"code": "cod", "label": "Cash on delivery", "provider": "cash"}
 
 #: Every method code the checkout may submit.
 PAYMENT_METHOD_CODES = {"card", "upi", "cod", "razorpay"}
 
-=======
 #: Absolute-path prefix for the headerless public image route.
 MEDIA_PREFIX = "/api/v1/storefront/shop/media"
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 
 
 def media_url(company_id: str, file_id: str | None) -> str | None:
@@ -116,7 +104,7 @@ def _product_images(p: Product, session: Session, categories: dict | None = None
         "slug": p.slug,
         "stock_type": p.stock_type,
         "view_count": p.view_count,
-<<<<<<< HEAD
+ 
         "image_url": product_image_url(p.id),
     }
 
@@ -137,10 +125,34 @@ def list_categories(session: Session, company_id: str) -> list[dict]:
     ).scalars().all()
     own: dict[str, int] = {}
     for category_id, count in session.execute(
-=======
-        "image_url": cover,
-        "images": images,
-    }
+        select(Product.category_id, func.count())
+        .where(
+            Product.company_id == company_id,
+            Product.is_active.is_(True),
+            Product.is_sellable.is_(True),
+        )
+        .group_by(Product.category_id)
+    ).all():
+        if category_id:
+            own[category_id] = count
+
+    children: dict[str, list[str]] = {}
+    for c in cats:
+        if c.parent_id:
+            children.setdefault(c.parent_id, []).append(c.id)
+
+    def subtree_count(category_id: str, depth: int = 0) -> int:
+        total = own.get(category_id, 0)
+        if depth > 10:  # defensive: category trees are small and shallow
+            return total
+        for child_id in children.get(category_id, []):
+            total += subtree_count(child_id, depth + 1)
+        return total
+
+    return [
+        _category_out(session, c, {k: subtree_count(k) for k in own})
+        for c in cats
+    ]
 
 
 def _product_brief(p: Product, session: Session, categories: dict | None = None) -> dict:
@@ -190,7 +202,7 @@ def _category_out(session: Session, c: Category, counts: dict) -> dict:
 def _category_counts(session: Session, company_id: str) -> dict:
     counts: dict[str | None, int] = {}
     for p in session.execute(
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
+ 
         select(Product.category_id, func.count())
         .where(
             Product.company_id == company_id,
@@ -199,33 +211,6 @@ def _category_counts(session: Session, company_id: str) -> dict:
         )
         .group_by(Product.category_id)
     ).all():
-<<<<<<< HEAD
-        if category_id:
-            own[category_id] = count
-
-    children: dict[str, list[str]] = {}
-    for c in cats:
-        if c.parent_id:
-            children.setdefault(c.parent_id, []).append(c.id)
-
-    def subtree_count(category_id: str, depth: int = 0) -> int:
-        total = own.get(category_id, 0)
-        if depth > 10:  # defensive: category trees are small and shallow
-            return total
-        for child in children.get(category_id, []):
-            total += subtree_count(child, depth + 1)
-        return total
-
-    return [
-        {
-            "id": c.id,
-            "name": c.name,
-            "parent_id": c.parent_id,
-            "product_count": subtree_count(c.id),
-        }
-        for c in cats
-    ]
-=======
         counts[p[0]] = p[1]
     return counts
 
@@ -239,7 +224,6 @@ def list_categories(session: Session, company_id: str, *, slug: str | None = Non
     cats = session.execute(stmt.order_by(Category.sort_order, Category.name)).scalars().all()
     counts = _category_counts(session, company_id)
     return [_category_out(session, c, counts) for c in cats]
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
 
 
 def _category_scope(session: Session, company_id: str, category_id: str) -> list[str]:
@@ -436,11 +420,7 @@ def product_detail(session: Session, company_id: str, product_id: str, *, count_
     ).scalars().all()
     categories = _category_map(session, company_id)
     return {
-<<<<<<< HEAD
-        **result,
-=======
         **_product_brief(product, session, categories),
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
         "category_name": category.name if category else None,
         "highlights": list(product.highlights or []),
         "colors": list(product.colors or []),
@@ -713,7 +693,6 @@ def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
         unit_price = line.get("unit_price") or (str(product.base_price) if product else "0")
         items.append(
             {
-<<<<<<< HEAD
                 "id": row.id,
                 "product_id": row.product_id,
                 "qty": str(row.qty),
@@ -725,16 +704,6 @@ def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
                 "line_total": line.get("line_total", "0"),
                 "stock_type": product.stock_type if product else "stock",
                 "image_url": product_image_url(product.id) if product else None,
-=======
-                "id": i.id,
-                "product_id": i.product_id,
-                "qty": str(i.qty),
-                "name": products[i.product_id].name if i.product_id in products else "Item",
-                "sku": products[i.product_id].sku if i.product_id in products else "",
-                "price": str(products[i.product_id].base_price) if i.product_id in products else "0",
-                "image_url": media_url(company_id, products[i.product_id].image_file_id) if i.product_id in products else None,
-                "tone": products[i.product_id].tone if i.product_id in products else None,
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
             }
         )
     return {"id": cart.id, "status": cart.status, "token": token, "items": items, "quote": quote}

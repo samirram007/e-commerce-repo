@@ -44,8 +44,4 @@ api_router.include_router(returns_router)
 api_router.include_router(reports_router)
 api_router.include_router(periods_router)
 api_router.include_router(audit_router)
-<<<<<<< HEAD
-=======
-api_router.include_router(storefront_router)
 api_router.include_router(storefront_admin_router)
->>>>>>> 54e515d3b6aaf64e97863aaa7cbacda772c82740
