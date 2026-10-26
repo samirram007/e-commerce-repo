@@ -3,9 +3,9 @@ import { safeRedirect, unmatchedPathTarget } from "./redirect";
 
 describe("safeRedirect", () => {
   it("defaults to the app home when no target was given", () => {
-    expect(safeRedirect(undefined)).toBe("/");
-    expect(safeRedirect(null)).toBe("/");
-    expect(safeRedirect("")).toBe("/");
+    expect(safeRedirect(undefined)).toBe("/dashboard");
+    expect(safeRedirect(null)).toBe("/dashboard");
+    expect(safeRedirect("")).toBe("/dashboard");
   });
 
   it("keeps same-origin app paths, including search and hash", () => {
@@ -15,30 +15,30 @@ describe("safeRedirect", () => {
   });
 
   it("rejects absolute URLs", () => {
-    expect(safeRedirect("https://evil.example/phish")).toBe("/");
-    expect(safeRedirect("javascript:alert(1)")).toBe("/");
-    expect(safeRedirect("shop/cart")).toBe("/");
+    expect(safeRedirect("https://evil.example/phish")).toBe("/dashboard");
+    expect(safeRedirect("javascript:alert(1)")).toBe("/dashboard");
+    expect(safeRedirect("shop/cart")).toBe("/dashboard");
   });
 
   it("rejects protocol-relative URLs, including the backslash form browsers accept", () => {
-    expect(safeRedirect("//evil.example")).toBe("/");
-    expect(safeRedirect("///evil.example")).toBe("/");
-    expect(safeRedirect("/\\evil.example")).toBe("/");
+    expect(safeRedirect("//evil.example")).toBe("/dashboard");
+    expect(safeRedirect("///evil.example")).toBe("/dashboard");
+    expect(safeRedirect("/\\evil.example")).toBe("/dashboard");
   });
 
   it("rejects targets with whitespace or control characters", () => {
-    expect(safeRedirect("/shop cart")).toBe("/");
-    expect(safeRedirect("/shop\nSet-Cookie: x=1")).toBe("/");
-    expect(safeRedirect("/shop\u0000")).toBe("/");
+    expect(safeRedirect("/shop cart")).toBe("/dashboard");
+    expect(safeRedirect("/shop\nSet-Cookie: x=1")).toBe("/dashboard");
+    expect(safeRedirect("/shop\u0000")).toBe("/dashboard");
   });
 });
 
 describe("unmatchedPathTarget", () => {
   it("keeps guests on the public storefront", () => {
-    expect(unmatchedPathTarget(false)).toBe("/shop");
+    expect(unmatchedPathTarget(false)).toBe("/");
   });
 
   it("returns signed-in users to the app shell", () => {
-    expect(unmatchedPathTarget(true)).toBe("/");
+    expect(unmatchedPathTarget(true)).toBe("/dashboard");
   });
 });

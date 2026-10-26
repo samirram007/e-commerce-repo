@@ -39,7 +39,7 @@ export function ProductCard({ product, showInterest = true }: Props) {
   return (
     <article className="shop-product-card">
       <Link
-        to="/shop/products/$productId"
+        to="/shop/$productId"
         params={{ productId: product.id }}
         className="shop-product-img"
         aria-label={product.name}
@@ -75,7 +75,7 @@ export function ProductCard({ product, showInterest = true }: Props) {
 
       <div className="shop-product-body">
         <Link
-          to="/shop/products/$productId"
+          to="/shop/$productId"
           params={{ productId: product.id }}
           className="shop-product-name"
         >

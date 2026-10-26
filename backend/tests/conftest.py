@@ -13,6 +13,11 @@ os.environ["DATABASE_URL"] = f"sqlite:/// {_TMPDIR}/test.db".replace(" ", "")
 os.environ["SEED_DEMO_DATA"] = "false"
 os.environ["SECRET_KEY"] = "test-secret"
 os.environ["MEDIA_DIR"] = _TMPDIR
+# A local .env may point at a real (or demo) gateway; tests configure Razorpay
+# per test via the `razorpay_stub` fixture and otherwise expect the sandbox.
+os.environ["RAZORPAY_KEY_ID"] = ""
+os.environ["RAZORPAY_KEY_SECRET"] = ""
+os.environ["RAZORPAY_DEMO"] = "0"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

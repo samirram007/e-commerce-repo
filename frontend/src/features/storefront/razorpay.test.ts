@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { openRazorpayCheckout } from "./razorpay";
+import { demoPaymentPayload, openRazorpayCheckout } from "./razorpay";
 import type { RazorpayOrderIntent } from "./types";
 
 const INTENT: RazorpayOrderIntent = {
@@ -77,5 +77,15 @@ describe("openRazorpayCheckout", () => {
   it("rejects when the shopper dismisses the window", async () => {
     installRazorpay((options) => options.modal?.ondismiss?.());
     await expect(openRazorpayCheckout(INTENT, {})).rejects.toThrow("Payment was cancelled");
+  });
+});
+
+describe("demoPaymentPayload", () => {
+  it("mints the demo payment fields the server accepts", () => {
+    const payload = demoPaymentPayload({ ...INTENT, demo: true });
+
+    expect(payload.razorpay_order_id).toBe(INTENT.razorpay_order_id);
+    expect(payload.razorpay_payment_id).toMatch(/^pay_demo_[a-z0-9]+$/);
+    expect(payload.razorpay_signature).toBe("demo");
   });
 });

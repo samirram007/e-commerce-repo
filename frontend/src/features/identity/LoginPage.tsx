@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { Button, Card, ErrorBanner, Field, Input, PageHeader } from "../../components/ui";
 import { fieldErrors } from "../../lib/zod-utils";
 import { safeRedirect } from "../../lib/redirect";
@@ -116,6 +116,14 @@ export function LoginPage() {
             {mode === "login" ? "First-time setup" : "Back to sign in"}
           </Button>
         </div>
+        {mode === "login" ? (
+          <p className="muted" style={{ marginTop: 12 }}>
+            New here?{" "}
+            <Link to="/register" search={redirect ? { redirect } : {}}>
+              Create an account
+            </Link>
+          </p>
+        ) : null}
       </Card>
     </div>
   );

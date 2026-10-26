@@ -330,3 +330,63 @@ def test_payment_methods_flag_razorpay_when_unconfigured(client, admin_headers):
     # without keys the sandbox methods are offered and Razorpay is explicitly off
     assert by_code["razorpay"]["available"] is False
     assert by_code["razorpay"]["reason"] == "not_configured"
+
+
+def test_shopper_registration_creates_account_and_links_customer(client, admin_headers, engine):
+    """Public signup: a shopper account with no ERP permissions, linked to a
+    customer record for the store resolved by slug."""
+    from sqlalchemy import update
+
+    from app.modules.companies.models import Company
+
+    _COMPANY_SEQ[0] += 1
+    seq = _COMPANY_SEQ[0]
+    slug = f"reg-store-{seq}"
+    cid = client.post(
+        "/api/v1/companies",
+        headers=admin_headers,
+        json={"name": f"Register Co {seq}", "base_currency": "INR"},
+    ).json()["id"]
+    # Company creation does not take a storefront slug; publish the store directly.
+    with engine.begin() as conn:
+        conn.execute(update(Company).where(Company.id == cid).values(storefront_slug=slug))
+
+    payload = {
+        "slug": slug,
+        "email": f"shopper{seq}@example.com",
+        "password": "sup3rsecret",
+        "full_name": "Shopper One",
+    }
+    resp = client.post("/api/v1/storefront/shop/register", json=payload)
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["company_id"] == cid
+
+    # the new account can sign in, sees only this store, and holds no ERP roles
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": payload["email"], "password": payload["password"]},
+    )
+    assert login.status_code == 200, login.text
+    me = client.get(
+        "/api/v1/auth/me",
+        headers={
+            "Authorization": f"Bearer {login.json()['access_token']}",
+            "X-Company-Id": cid,
+        },
+    )
+    assert me.status_code == 200, me.text
+    assert me.json()["permissions"] == []
+    assert [c["id"] for c in me.json()["companies"]] == [cid]
+
+    # a customer record backs the account, so orders attach to a real customer
+    customers = client.get(
+        "/api/v1/partners/customers",
+        headers={"Authorization": admin_headers["Authorization"], "X-Company-Id": cid},
+    ).json()
+    linked = [c for c in customers if c["email"] == payload["email"]]
+    assert len(linked) == 1
+    assert linked[0]["notes"] == "Storefront account"
+
+    # the same email cannot register twice
+    again = client.post("/api/v1/storefront/shop/register", json=payload)
+    assert again.status_code == 409

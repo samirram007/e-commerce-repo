@@ -3,9 +3,9 @@
  */
 
 /** Fallback for a signed-in visitor whose URL matched no route. */
-const AUTHED_HOME = "/";
-/** Fallback for a guest whose URL matched no route: the public storefront. */
-const GUEST_HOME = "/shop";
+const AUTHED_HOME = "/dashboard";
+/** Fallback for a guest whose URL matched no route: the public storefront home. */
+const GUEST_HOME = "/";
 
 /**
  * Post-login target from `?redirect=`.

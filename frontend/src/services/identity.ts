@@ -50,6 +50,27 @@ export async function bootstrap(email: string, password: string, full_name: stri
   return data.access_token;
 }
 
+export interface ShopperRegisterInput {
+  slug: string;
+  email: string;
+  password: string;
+  full_name: string;
+}
+
+/**
+ * Public storefront signup. The store is resolved by its slug, so the new
+ * account is created as a shopper of that store (no ERP roles).
+ */
+export async function registerShopper(
+  input: ShopperRegisterInput,
+): Promise<{ company_id: string; email: string }> {
+  const { data } = await api.post<never, { data: { company_id: string; email: string } }>(
+    "/storefront/shop/register",
+    input,
+  );
+  return data;
+}
+
 export async function me(): Promise<MeOut> {
   const { data } = await api.get<MeOut>("/auth/me");
   return data;

@@ -104,8 +104,8 @@ def _product_images(p: Product, session: Session, categories: dict | None = None
         "slug": p.slug,
         "stock_type": p.stock_type,
         "view_count": p.view_count,
- 
-        "image_url": product_image_url(p.id),
+        "image_url": cover or product_image_url(p.id),
+        "images": images,
     }
 
 
@@ -114,45 +114,6 @@ def product_image_url(product_id: str) -> str:
     product has one, otherwise a deterministic generated tile (see
     `placeholder_image_svg`)."""
     return f"/api/v1/storefront/shop/products/{product_id}/image"
-
-
-# ---- catalog browse ----
-def list_categories(session: Session, company_id: str) -> list[dict]:
-    """Categories with sellable-product counts rolled up through children,
-    so a parent card matches what opening that category actually shows."""
-    cats = session.execute(
-        select(Category).where(Category.company_id == company_id).order_by(Category.name)
-    ).scalars().all()
-    own: dict[str, int] = {}
-    for category_id, count in session.execute(
-        select(Product.category_id, func.count())
-        .where(
-            Product.company_id == company_id,
-            Product.is_active.is_(True),
-            Product.is_sellable.is_(True),
-        )
-        .group_by(Product.category_id)
-    ).all():
-        if category_id:
-            own[category_id] = count
-
-    children: dict[str, list[str]] = {}
-    for c in cats:
-        if c.parent_id:
-            children.setdefault(c.parent_id, []).append(c.id)
-
-    def subtree_count(category_id: str, depth: int = 0) -> int:
-        total = own.get(category_id, 0)
-        if depth > 10:  # defensive: category trees are small and shallow
-            return total
-        for child_id in children.get(category_id, []):
-            total += subtree_count(child_id, depth + 1)
-        return total
-
-    return [
-        _category_out(session, c, {k: subtree_count(k) for k in own})
-        for c in cats
-    ]
 
 
 def _product_brief(p: Product, session: Session, categories: dict | None = None) -> dict:
@@ -194,15 +155,17 @@ def _category_out(session: Session, c: Category, counts: dict) -> dict:
         "tone": c.tone,
         "image_url": media_url(c.company_id, c.image_file_id),
         "parent_id": c.parent_id,
-        "product_count": counts.get(c.id, 0) + counts.get(None, 0) if c.parent_id is None else counts.get(c.id, 0),
+        "product_count": counts.get(c.id, 0),
         "sort_order": c.sort_order,
     }
 
 
 def _category_counts(session: Session, company_id: str) -> dict:
+    """Sellable+active product counts per category, rolled up through children
+    so a parent card matches what opening that category actually shows
+    (uncategorised products never leak into a card)."""
     counts: dict[str | None, int] = {}
-    for p in session.execute(
- 
+    for category_id, count in session.execute(
         select(Product.category_id, func.count())
         .where(
             Product.company_id == company_id,
@@ -211,8 +174,26 @@ def _category_counts(session: Session, company_id: str) -> dict:
         )
         .group_by(Product.category_id)
     ).all():
-        counts[p[0]] = p[1]
-    return counts
+        counts[category_id] = count
+
+    children: dict[str, list[str]] = {}
+    category_ids: list[str] = []
+    for category_id, parent_id in session.execute(
+        select(Category.id, Category.parent_id).where(Category.company_id == company_id)
+    ).all():
+        category_ids.append(category_id)
+        if parent_id:
+            children.setdefault(parent_id, []).append(category_id)
+
+    def rollup(category_id: str, depth: int = 0) -> int:
+        total = counts.get(category_id, 0)
+        if depth > 10:  # defensive: category trees are small and shallow
+            return total
+        for child_id in children.get(category_id, []):
+            total += rollup(child_id, depth + 1)
+        return total
+
+    return {category_id: rollup(category_id) for category_id in category_ids}
 
 
 def list_categories(session: Session, company_id: str, *, slug: str | None = None) -> list[dict]:
@@ -390,17 +371,6 @@ def product_detail(session: Session, company_id: str, product_id: str, *, count_
         product.view_count = (product.view_count or 0) + 1
         session.add(product)
         session.flush()
-    result = {
-        "id": product.id,
-        "sku": product.sku,
-        "name": product.name,
-        "description": product.description,
-        "category_id": product.category_id,
-        "price": str(product.base_price),
-        "stock_type": product.stock_type,
-        "view_count": product.view_count,
-        "image_url": product_image_url(product.id),
-    }
     category = session.get(Category, product.category_id) if product.category_id else None
     related = session.execute(
         select(Product)
@@ -938,6 +908,53 @@ def store_info(session: Session, slug: str) -> dict:
     }
 
 
+def register_shopper(
+    session: Session, *, slug: str, email: str, password: str, full_name: str
+) -> dict:
+    """Create a storefront shopper account for the store behind `slug`.
+
+    Shoppers are `users` like staff (email stays globally unique), but their
+    membership grants no ERP roles — the account only unlocks the shopper's own
+    cart, orders, wishlist and addresses. A customer record is created (or
+    linked) so their orders belong to a real customer of the store.
+    """
+    from app.modules.companies import service as companies_svc
+    from app.modules.identity import service as identity_svc
+
+    company_id = store_info(session, slug)["company_id"]
+    email = (email or "").strip().lower()
+    user = identity_svc.create_user(
+        session,
+        email=email,
+        password=password,
+        full_name=full_name,
+        is_platform_admin=False,
+    )
+    companies_svc.grant_membership(
+        session, company_id=company_id, user_id=user.id, is_company_admin=False, role_names=[]
+    )
+
+    customer = session.scalar(
+        select(Customer).where(
+            Customer.company_id == company_id, func.lower(Customer.email) == email
+        )
+    )
+    if customer is None:
+        customer = Customer(
+            company_id=company_id,
+            code=_customer_code(email),
+            name=full_name or email,
+            email=email,
+            user_id=user.id,
+            notes="Storefront account",
+        )
+        session.add(customer)
+    elif customer.user_id is None:
+        customer.user_id = user.id
+    session.flush()
+    return {"company_id": company_id, "email": user.email, "full_name": user.full_name}
+
+
 def payment_methods(session: Session, company_id: str, *, pincode: str | None = None) -> list[dict]:
     """Available payment methods.
 
@@ -1058,6 +1075,12 @@ def delete_address(session: Session, company_id: str, owner: str, address_id: st
 
 
 # ---- guest checkout ----
+def _customer_code(email: str) -> str:
+    """Deterministic customer code so a web signup and a later guest checkout
+    with the same email converge on one customer record."""
+    return "WEB-" + hashlib.sha1(email.encode("utf-8")).hexdigest()[:10].upper()
+
+
 def _guest_customer(
     session: Session, company_id: str, *, name: str, email: str, phone: str | None
 ) -> Customer:
@@ -1075,10 +1098,9 @@ def _guest_customer(
             existing.phone = phone
         session.flush()
         return existing
-    code = "WEB-" + hashlib.sha1(email.encode("utf-8")).hexdigest()[:10].upper()
     customer = Customer(
         company_id=company_id,
-        code=code,
+        code=_customer_code(email),
         name=name or email,
         email=email,
         phone=phone,
@@ -1435,7 +1457,8 @@ def create_razorpay_order(
 
     company = session.get(Company, company_id)
     return {
-        "key_id": settings.razorpay_key_id,
+        "key_id": settings.razorpay_key_id or "rzp_demo_storefront",
+        "demo": razorpay.is_demo(),
         "razorpay_order_id": gateway_order_id,
         "amount": razorpay.amount_to_paise(order.total),
         "currency": order.currency,

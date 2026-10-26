@@ -26,9 +26,24 @@ from app.core.exceptions import BusinessRuleError
 API_BASE = "https://api.razorpay.com/v1"
 API_BASE_ENV = "RAZORPAY_API_BASE"  # overridable for local tests/sandboxes
 
+# Demo mode recognises payments minted by the in-app demo checkout.
+DEMO_SIGNATURE = "demo"
+PAYMENT_DEMO_PREFIX = "pay_demo_"
+
 
 def is_configured() -> bool:
     return get_settings().razorpay_configured
+
+
+def is_demo() -> bool:
+    """Simulated gateway used for demos/local testing (no credentials needed)."""
+    return get_settings().razorpay_demo_mode
+
+
+def _demo_id(prefix: str) -> str:
+    import secrets
+
+    return f"{prefix}_demo_{secrets.token_hex(8)}"
 
 
 def _require_config() -> None:
@@ -87,7 +102,21 @@ def _request(method: str, path: str, payload: dict | None = None) -> dict:
 def create_order(
     *, amount_paise: int, currency: str, receipt: str, notes: dict | None = None
 ) -> dict:
-    """Create a Razorpay order; `payment_capture: 1` captures automatically."""
+    """Create a Razorpay order; `payment_capture: 1` captures automatically.
+
+    In demo mode the order is fabricated locally with the same shape, so the
+    checkout flow runs end to end without gateway credentials.
+    """
+    if is_demo():
+        return {
+            "id": _demo_id("order"),
+            "entity": "order",
+            "amount": int(amount_paise),
+            "currency": currency,
+            "receipt": receipt[:40],
+            "status": "created",
+            "notes": notes or {},
+        }
     return _request(
         "POST",
         "/orders",
@@ -102,10 +131,25 @@ def create_order(
 
 
 def fetch_payment(payment_id: str) -> dict:
+    if is_demo():
+        return {
+            "id": payment_id,
+            "entity": "payment",
+            "status": "captured",
+            "captured": True,
+        }
     return _request("GET", f"/payments/{payment_id}")
 
 
 def refund(payment_id: str, *, amount_paise: int, notes: dict | None = None) -> dict:
+    if is_demo():
+        return {
+            "id": _demo_id("rfnd"),
+            "entity": "refund",
+            "status": "processed",
+            "amount": int(amount_paise),
+            "payment_id": payment_id,
+        }
     return _request(
         "POST",
         f"/payments/{payment_id}/refund",
@@ -114,10 +158,21 @@ def refund(payment_id: str, *, amount_paise: int, notes: dict | None = None) -> 
 
 
 def verify_payment_signature(*, order_id: str, payment_id: str, signature: str) -> bool:
-    """`HMAC_SHA256(order_id|payment_id, key_secret)` must match the signature."""
+    """`HMAC_SHA256(order_id|payment_id, key_secret)` must match the signature.
+
+    Demo mode accepts the literal signature `demo` for a `pay_demo…` id, which
+    is exactly what the in-app demo checkout returns.
+    """
     _require_config()
     if not order_id or not payment_id or not signature:
         raise BusinessRuleError("RAZORPAY_BAD_SIGNATURE", "Missing Razorpay payment fields")
+    if is_demo():
+        if signature == "demo" and payment_id.startswith(PAYMENT_DEMO_PREFIX):
+            return True
+        raise BusinessRuleError(
+            "RAZORPAY_BAD_SIGNATURE",
+            "Demo payments must use the in-app demo checkout",
+        )
     secret = get_settings().razorpay_key_secret.encode()
     expected = hmac.new(
         secret, f"{order_id}|{payment_id}".encode(), hashlib.sha256

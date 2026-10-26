@@ -34,7 +34,7 @@ export function ProductRail({
           {subtitle ? <p className="shop-section-sub muted">{subtitle}</p> : null}
         </div>
         {viewAll ? (
-          <Link to="/shop/products" search={viewAll} className="shop-text-link">
+          <Link to="/shop" search={viewAll} className="shop-text-link">
             View all →
           </Link>
         ) : null}

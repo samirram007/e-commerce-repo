@@ -639,3 +639,75 @@ def test_late_checkout_callback_refunds_expired_order(client, admin_headers, raz
     assert body["refunded"] is True
     assert body["payment_state"] == "refunded" and body["status"] == "cancelled"
     assert razorpay_stub["refunds"][0]["amount_paise"] == 64000
+
+
+def test_razorpay_demo_mode_runs_without_gateway_credentials(monkeypatch):
+    """The demo key drives checkout end to end with no Razorpay account."""
+    from app.core.config import settings_refresh
+    from app.core.exceptions import BusinessRuleError
+    from app.modules.payments import razorpay
+
+    monkeypatch.setenv("RAZORPAY_DEMO", "1")
+    monkeypatch.setenv("RAZORPAY_KEY_ID", "rzp_demo_storefront")
+    monkeypatch.setenv("RAZORPAY_KEY_SECRET", "demo_secret")
+    settings_refresh()
+    try:
+        assert razorpay.is_demo()
+        order = razorpay.create_order(amount_paise=50000, currency="INR", receipt="SO-1")
+        assert order["id"].startswith("order_demo_")
+        assert order["amount"] == 50000
+
+        # the in-app demo checkout's fields are accepted ...
+        assert razorpay.verify_payment_signature(
+            order_id=order["id"], payment_id="pay_demo_abc123", signature="demo"
+        )
+        # ... a real payment id signed with the demo signature is not
+        with pytest.raises(BusinessRuleError):
+            razorpay.verify_payment_signature(
+                order_id=order["id"], payment_id="pay_real_abc123", signature="demo"
+            )
+    finally:
+        monkeypatch.undo()
+        settings_refresh()
+
+
+def test_demo_gateway_pays_order_end_to_end(client, admin_headers, monkeypatch):
+    """A demo Razorpay key completes checkout without gateway credentials."""
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "razorpay_key_id", "rzp_demo_storefront", raising=False)
+    monkeypatch.setattr(settings, "razorpay_key_secret", "demo_secret", raising=False)
+    monkeypatch.setattr(settings, "razorpay_demo", False, raising=False)
+
+    ctx = _setup_store(client, admin_headers, price="500")
+
+    methods = client.get(
+        "/api/v1/storefront/shop/payment-methods", headers=ctx["headers"]
+    ).json()
+    assert any(m["code"] == "razorpay" and m["available"] for m in methods)
+
+    placed = _place(client, ctx, method="razorpay")
+    assert placed.status_code == 200, placed.text
+    order = placed.json()
+    assert order["payment_state"] == "unpaid"
+
+    intent = client.post(
+        f"/api/v1/storefront/shop/orders/{order['id']}/razorpay", headers=ctx["headers"]
+    )
+    assert intent.status_code == 200, intent.text
+    payload = intent.json()
+    assert payload["demo"] is True
+    assert payload["razorpay_order_id"].startswith("order_demo_")
+
+    verified = client.post(
+        f"/api/v1/storefront/shop/orders/{order['id']}/razorpay/verify",
+        headers=ctx["headers"],
+        json={
+            "razorpay_order_id": payload["razorpay_order_id"],
+            "razorpay_payment_id": "pay_demo_abc123",
+            "razorpay_signature": "demo",
+        },
+    )
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["payment_state"] == "paid"

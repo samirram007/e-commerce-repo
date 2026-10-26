@@ -72,7 +72,7 @@ export function ProductDetailPage({ productId: productIdProp }: { productId?: st
   return (
     <div className="shop-page">
       <nav className="shop-breadcrumb muted">
-        <Link to="/shop/products">Products</Link>
+        <Link to="/shop">Products</Link>
         <span> / </span>
         <span>{p.name}</span>
       </nav>
@@ -105,7 +105,7 @@ export function ProductDetailPage({ productId: productIdProp }: { productId?: st
             <Button onClick={() => add.mutate()} disabled={add.isPending || !productId}>
               {add.isPending ? "Adding…" : added ? "Added ✓" : "Add to cart"}
             </Button>
-            <Link to="/shop/cart" className="btn secondary shop-pdp-cart-link">
+            <Link to="/cart" className="btn secondary shop-pdp-cart-link">
               View cart
             </Link>
           </div>

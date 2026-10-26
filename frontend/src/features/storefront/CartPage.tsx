@@ -46,12 +46,12 @@ function CartRow({
 
   return (
     <div className="shop-cart-row">
-      <Link to="/shop/products/$productId" params={{ productId: item.product_id }} className="shop-cart-media">
+      <Link to="/shop/$productId" params={{ productId: item.product_id }} className="shop-cart-media">
         <ProductImage name={item.name} sku={item.sku} imageUrl={item.image_url} />
       </Link>
 
       <div className="shop-cart-info">
-        <Link to="/shop/products/$productId" params={{ productId: item.product_id }} className="shop-cart-name">
+        <Link to="/shop/$productId" params={{ productId: item.product_id }} className="shop-cart-name">
           {item.name}
         </Link>
         <span className="muted">
@@ -142,7 +142,7 @@ export function CartPage() {
         <h1 className="page-title">Your cart</h1>
         <EmptyState title="Your cart is empty" message="Add some products to get started." />
         <div className="shop-cart-empty-cta">
-          <Link to="/shop/products" className="btn">
+          <Link to="/shop" className="btn">
             Browse products
           </Link>
         </div>
@@ -160,7 +160,7 @@ export function CartPage() {
           <span className="muted">
             {items.length} item{items.length === 1 ? "" : "s"}
           </span>
-          <Link to="/shop/products" className="shop-text-link">
+          <Link to="/shop" className="shop-text-link">
             Continue shopping
           </Link>
         </div>
@@ -221,7 +221,7 @@ export function CartPage() {
           <Button variant="secondary" onClick={() => clear.mutate()} disabled={clear.isPending}>
             {clear.isPending ? "Clearing…" : "Clear cart"}
           </Button>
-          <Button onClick={() => navigate({ to: "/shop/checkout" })} disabled={clear.isPending}>
+          <Button onClick={() => navigate({ to: "/checkout" })} disabled={clear.isPending}>
             Checkout
           </Button>
         </div>

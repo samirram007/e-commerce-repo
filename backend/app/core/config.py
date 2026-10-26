@@ -77,14 +77,24 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
     razorpay_timeout_seconds: int = 15
+    # Demo gateway: run the whole checkout flow against a simulated Razorpay
+    # (no credentials, no network). Never enable this in production.
+    razorpay_demo: bool = False
 
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
 
     @property
+    def razorpay_demo_mode(self) -> bool:
+        """Demo gateway: enabled by `RAZORPAY_DEMO=1` or a `rzp_demo…` key id."""
+        return self.razorpay_demo or self.razorpay_key_id.strip().lower().startswith("rzp_demo")
+
+    @property
     def razorpay_configured(self) -> bool:
-        """True when both API keys are present, so checkout can be offered."""
+        """True when checkout can offer online payment (real keys or demo mode)."""
+        if self.razorpay_demo_mode:
+            return True
         return bool(self.razorpay_key_id.strip() and self.razorpay_key_secret.strip())
 
     @model_validator(mode="after")

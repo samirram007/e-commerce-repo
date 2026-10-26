@@ -55,7 +55,7 @@ export function HomePage() {
           Browse the catalog, save what you love, and check out in a couple of clicks.
         </p>
         <div className="shop-hero-actions">
-          <Link to="/shop/products" className="btn shop-hero-cta">
+          <Link to="/shop" className="btn shop-hero-cta">
             Shop all products
           </Link>
           <a href="#categories" className="btn secondary shop-hero-cta">
@@ -72,7 +72,7 @@ export function HomePage() {
       <section className="shop-section" id="categories">
         <div className="shop-section-head">
           <h2>Categories</h2>
-          <Link to="/shop/products" className="shop-text-link">
+          <Link to="/shop" className="shop-text-link">
             All products →
           </Link>
         </div>
@@ -87,7 +87,7 @@ export function HomePage() {
             {categories.data!.map((c) => (
               <Link
                 key={c.id}
-                to="/shop/products"
+                to="/shop"
                 search={{ category: c.id }}
                 className="shop-category-card"
               >

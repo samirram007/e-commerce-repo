@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AuthError, BusinessRuleError, NotFoundError
@@ -326,6 +326,26 @@ def public_media(
 @router.get("/store/{slug}")
 def store_info(slug: str, session: Session = Depends(get_db)):
     return svc.store_info(session, slug)
+
+
+class ShopperRegisterIn(BaseModel):
+    """Public signup: the store is resolved by slug, the shopper gets no ERP roles."""
+
+    slug: str = Field(default="default", max_length=50)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str = Field(default="", max_length=200)
+
+
+@router.post("/register", status_code=201)
+def register_shopper(payload: ShopperRegisterIn, session: Session = Depends(get_db)):
+    return svc.register_shopper(
+        session,
+        slug=payload.slug,
+        email=payload.email,
+        password=payload.password,
+        full_name=payload.full_name,
+    )
 
 
 @router.get("/payment-methods")

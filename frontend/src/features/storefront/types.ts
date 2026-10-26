@@ -121,6 +121,8 @@ export interface PaymentMethod {
 /** Gateway order returned by `POST /orders/{id}/razorpay`. */
 export interface RazorpayOrderIntent {
   key_id: string;
+  /** True when the backend runs the simulated gateway (no credentials). */
+  demo?: boolean;
   razorpay_order_id: string;
   /** Amount in paise. */
   amount: number;

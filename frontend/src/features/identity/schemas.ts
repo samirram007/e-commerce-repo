@@ -14,6 +14,14 @@ export const bootstrapFormSchema = z.object({
 });
 export type BootstrapFormInput = z.input<typeof bootstrapFormSchema>;
 
+/** Storefront shopper signup (RegisterPage). */
+export const registerFormSchema = z.object({
+  email: z.email("Enter a valid email address"),
+  password: z.string().min(8, "Use at least 8 characters"),
+  full_name: z.string().trim().min(2, "Enter your name").max(200, "Too long"),
+});
+export type RegisterFormInput = z.input<typeof registerFormSchema>;
+
 /* ---- users ---- */
 export const userSchema = z.object({
   id: z.string(),

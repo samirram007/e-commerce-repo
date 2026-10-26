@@ -152,7 +152,7 @@ export function CheckoutPage() {
             <Link to="/shop/orders" className="btn">
               View orders
             </Link>
-            <Link to="/shop/products" className="btn secondary">
+            <Link to="/shop" className="btn secondary">
               Continue shopping
             </Link>
           </div>
@@ -169,7 +169,7 @@ export function CheckoutPage() {
         <h1 className="page-title">Checkout</h1>
         <EmptyState title="Your cart is empty" message="Add a product before checking out." />
         <div className="shop-cart-empty-cta">
-          <Link to="/shop/products" className="btn">
+          <Link to="/shop" className="btn">
             Browse products
           </Link>
         </div>
@@ -184,7 +184,7 @@ export function CheckoutPage() {
     <div className="shop-page">
       <div className="shop-results-head">
         <h1 className="page-title">Checkout</h1>
-        <Link to="/shop/cart" className="shop-text-link">
+        <Link to="/cart" className="shop-text-link">
           Back to cart
         </Link>
       </div>
