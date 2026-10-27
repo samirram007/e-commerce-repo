@@ -131,6 +131,7 @@ def _product_fields(data: dict, updating: bool = False) -> dict:
     allowed = {
         "sku", "name", "description", "category_id", "uom_id", "barcode", "hsn_sac",
         "stock_type", "track_batches", "track_serials", "base_cost", "base_price",
+        "weight_kg", "length_cm", "width_cm", "height_cm",
         "default_tax_rate_id", "is_active", "is_sellable", "is_purchasable",
     }
     raw = {k: v for k, v in data.items() if k in allowed and v is not None}
@@ -142,6 +143,12 @@ def _product_fields(data: dict, updating: bool = False) -> dict:
             )
         if raw["hsn_sac"] is None:
             raw.pop("hsn_sac")
+    for measure in ("weight_kg", "length_cm", "width_cm", "height_cm"):
+        if measure in raw:
+            value = dec(raw[measure])
+            if value < 0:
+                raise BusinessRuleError("BAD_MEASURE", f"{measure} cannot be negative")
+            raw[measure] = q4(value) if measure == "weight_kg" else value
     if "base_cost" in raw:
         raw["base_cost"] = dec(raw["base_cost"])
     if "base_price" in raw:

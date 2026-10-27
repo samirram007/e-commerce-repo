@@ -18,6 +18,8 @@ import hmac
 import json
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import Decimal
 
 from app.core.config import get_settings
@@ -30,14 +32,51 @@ API_BASE_ENV = "RAZORPAY_API_BASE"  # overridable for local tests/sandboxes
 DEMO_SIGNATURE = "demo"
 PAYMENT_DEMO_PREFIX = "pay_demo_"
 
+#: Credentials of the company whose payment is being handled. The admin panel
+#: stores them per company; the storefront scopes each gateway call to the
+#: company that owns the order. Outside the scope the deployment env applies.
+_CREDENTIALS: ContextVar[dict | None] = ContextVar("razorpay_credentials", default=None)
+
+
+def active_credentials() -> dict:
+    return _CREDENTIALS.get() or {}
+
+
+@contextmanager
+def use_credentials(credentials: dict | None):
+    """Run a block with one company's Razorpay credentials (None = environment)."""
+    token = _CREDENTIALS.set(credentials or None)
+    try:
+        yield
+    finally:
+        _CREDENTIALS.reset(token)
+
 
 def is_configured() -> bool:
+    credentials = active_credentials()
+    if credentials.get("key_id") and credentials.get("key_secret"):
+        return True
     return get_settings().razorpay_configured
 
 
 def is_demo() -> bool:
     """Simulated gateway used for demos/local testing (no credentials needed)."""
+    credentials = active_credentials()
+    if credentials.get("key_id") or credentials.get("key_secret"):
+        # Keys from the admin panel are authoritative: never mint a demo payment.
+        return False
     return get_settings().razorpay_demo_mode
+
+
+def key_id() -> str:
+    """Key id the browser opens Checkout with (panel credentials first)."""
+    credentials = active_credentials()
+    return credentials.get("key_id") or get_settings().razorpay_key_id
+
+
+def _secret() -> str:
+    credentials = active_credentials()
+    return credentials.get("key_secret") or get_settings().razorpay_key_secret
 
 
 def _demo_id(prefix: str) -> str:
@@ -76,9 +115,7 @@ def _request(method: str, path: str, payload: dict | None = None) -> dict:
     url = f"{_api_base()}{path}"
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = urllib.request.Request(url, data=data, method=method)
-    token = base64.b64encode(
-        f"{settings.razorpay_key_id}:{settings.razorpay_key_secret}".encode()
-    ).decode()
+    token = base64.b64encode(f"{key_id()}:{_secret()}".encode()).decode()
     request.add_header("Authorization", f"Basic {token}")
     request.add_header("Content-Type", "application/json")
     try:
@@ -173,7 +210,7 @@ def verify_payment_signature(*, order_id: str, payment_id: str, signature: str) 
             "RAZORPAY_BAD_SIGNATURE",
             "Demo payments must use the in-app demo checkout",
         )
-    secret = get_settings().razorpay_key_secret.encode()
+    secret = _secret().encode()
     expected = hmac.new(
         secret, f"{order_id}|{payment_id}".encode(), hashlib.sha256
     ).hexdigest()
@@ -187,16 +224,17 @@ def verify_payment_signature(*, order_id: str, payment_id: str, signature: str) 
 
 def verify_webhook_signature(raw_body: bytes, signature: str | None) -> bool:
     """Webhooks are signed with HMAC_SHA256 over the exact request body."""
-    settings = get_settings()
-    if not settings.razorpay_webhook_secret:
+    credentials = active_credentials()
+    webhook_secret = credentials.get("webhook_secret") or get_settings().razorpay_webhook_secret
+    if not webhook_secret:
         raise BusinessRuleError(
             "RAZORPAY_WEBHOOK_UNCONFIGURED",
-            "Set RAZORPAY_WEBHOOK_SECRET to accept Razorpay webhooks",
+            "Set RAZORPAY_WEBHOOK_SECRET (or a company webhook secret in the gateway panel) to accept Razorpay webhooks",
         )
     if not signature:
         raise BusinessRuleError("RAZORPAY_BAD_SIGNATURE", "Missing X-Razorpay-Signature")
     expected = hmac.new(
-        settings.razorpay_webhook_secret.encode(), raw_body, hashlib.sha256
+        webhook_secret.encode(), raw_body, hashlib.sha256
     ).hexdigest()
     if not hmac.compare_digest(expected, signature):
         raise BusinessRuleError("RAZORPAY_BAD_SIGNATURE", "Webhook signature verification failed")

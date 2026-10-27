@@ -36,6 +36,8 @@ class InvoiceCreateIn(BaseModel):
     customer_address: str | None = None
     currency: str = Field(default="INR", min_length=3, max_length=3)
     shipping_total: Decimal = Decimal("0")
+    # order-level manual discount, spread across the lines by value
+    discount: Decimal = Decimal("0")
     due_date: date | None = None
     notes: str | None = None
     order_id: str | None = None
@@ -215,6 +217,7 @@ def create_invoice(payload: InvoiceCreateIn, ctx: CompanyCtx = Depends(guard(P_I
         currency=payload.currency,
         lines=[l.model_dump() for l in payload.lines],
         shipping_total=payload.shipping_total,
+        discount=payload.discount,
         notes=payload.notes,
         due_date=payload.due_date,
         order_id=payload.order_id,

@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  applyCoupon,
   createRazorpayOrder,
   placeOrder,
+  removeCoupon,
   verifyRazorpayPayment,
 } from "./api";
 import { openRazorpayCheckout } from "./razorpay";
@@ -13,6 +15,7 @@ import {
   isValidPincode,
   paymentMethodsQueryOptions,
   pincodeQueryOptions,
+  shippingOptionsQueryOptions,
   shopKeys,
 } from "./queries";
 import { Button, EmptyState, Field, Input, Spinner } from "../../components/ui";
@@ -38,6 +41,8 @@ export function CheckoutPage() {
   const [region, setRegion] = useState("");
   const [pincode, setPincode] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [shippingCode, setShippingCode] = useState("");
+  const [promoCode, setPromoCode] = useState("");
   const [done, setDone] = useState<{
     orderId: string;
     docNumber: string;
@@ -49,6 +54,12 @@ export function CheckoutPage() {
   const pinOk = isValidPincode(pincode);
   const pincodeQuery = useQuery(pincodeQueryOptions(pincode));
   const paymentMethods = useQuery(paymentMethodsQueryOptions(pinOk ? pincode.trim() : undefined));
+  const shippingOptions = useQuery(
+    shippingOptionsQueryOptions(pinOk ? pincode.trim() : undefined),
+  );
+
+  const shipOptions = shippingOptions.data ?? [];
+  const selectedShipping = shipOptions.find((option) => option.code === shippingCode) ?? shipOptions[0];
 
   const codAllowed = pincodeQuery.data?.cod_allowed ?? true;
   const pmOptions = (paymentMethods.data ?? []).filter(
@@ -57,6 +68,11 @@ export function CheckoutPage() {
   const gatewayMissing = (paymentMethods.data ?? []).some(
     (m) => m.code === "razorpay" && !m.available,
   );
+  // The gateway the shopper picked, straight from the admin's configuration:
+  // its `kind` says how the payment finishes.
+  const selectedMethod = pmOptions.find((m) => m.code === paymentMethod);
+  const hostedCheckout =
+    selectedMethod?.kind === "hosted_modal" && selectedMethod.provider === "razorpay";
 
   // Checkout runs through the gateway: preselect the first usable method
   // (Razorpay when the API has keys) so "Pay" opens Checkout straight away.
@@ -65,12 +81,31 @@ export function CheckoutPage() {
     setPaymentMethod(pmOptions[0]?.code ?? "");
   }, [paymentMethod, pmOptions]);
 
+  // The shop's delivery options can change with the PIN code / cart; keep one selected.
+  useEffect(() => {
+    if (shippingCode && shipOptions.some((option) => option.code === shippingCode)) return;
+    setShippingCode(shipOptions[0]?.code ?? "");
+  }, [shippingCode, shipOptions]);
+
   // A PIN-code change can withdraw COD; fall back to a method that is still offered.
   useEffect(() => {
     if (!paymentMethod) return;
     if (pmOptions.some((m) => m.code === paymentMethod)) return;
     setPaymentMethod(pmOptions[0]?.code ?? "");
   }, [paymentMethod, pmOptions]);
+
+  // Promo code: the backend prices it, so the quote below is always the truth.
+  const applyPromo = useMutation({
+    mutationFn: (code: string) => applyCoupon(code),
+    onSuccess: () => {
+      setPromoCode("");
+      qc.invalidateQueries({ queryKey: shopKeys.cart });
+    },
+  });
+  const dropPromo = useMutation({
+    mutationFn: () => removeCoupon(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: shopKeys.cart }),
+  });
 
   const place = useMutation({
     mutationFn: async (): Promise<ShopOrder> => {
@@ -89,10 +124,12 @@ export function CheckoutPage() {
           },
           payment_method: paymentMethod,
           shipping_total: cart.data?.quote.shipping_total,
+          // Only carriers the shop configured are sent; standard delivery omits it.
+          ...(selectedShipping?.carrier ? { shipping_carrier: selectedShipping.carrier } : {}),
         },
         uuid(),
       );
-      if (order.payment_state === "paid" || paymentMethod !== "razorpay") return order;
+      if (order.payment_state === "paid" || !hostedCheckout) return order;
 
       // Razorpay: create the gateway order, open Checkout, verify server-side.
       const intent = await createRazorpayOrder(order.id);
@@ -258,6 +295,34 @@ export function CheckoutPage() {
             ) : null
           ) : null}
 
+          <h2>Delivery</h2>
+          {shippingOptions.isLoading ? (
+            <Spinner />
+          ) : shipOptions.length === 0 ? (
+            <p className="shop-hint">Delivery options load once you enter a PIN code.</p>
+          ) : (
+            <div className="shop-payment-methods">
+              {shipOptions.map((option) => (
+                <label
+                  key={option.code}
+                  className={`shop-payment-option ${selectedShipping?.code === option.code ? "selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="shipping_option"
+                    value={option.code}
+                    checked={selectedShipping?.code === option.code}
+                    onChange={() => setShippingCode(option.code)}
+                  />
+                  <span>{option.label}</span>
+                  <span className="muted">
+                    {Number(option.price) > 0 ? formatMoney(option.price, currency) : "Free"}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
           <h2>Payment method</h2>
           {paymentMethods.isLoading ? (
             <Spinner />
@@ -274,7 +339,10 @@ export function CheckoutPage() {
                     checked={paymentMethod === m.code}
                     onChange={() => setPaymentMethod(m.code)}
                   />
-                  <span>{m.label}</span>
+                  <span>
+                    {m.label}
+                    {m.instructions ? <div className="muted">{m.instructions}</div> : null}
+                  </span>
                   <span className="muted">{m.provider}</span>
                 </label>
               ))}
@@ -304,17 +372,57 @@ export function CheckoutPage() {
             }
           >
             {place.isPending
-              ? paymentMethod === "razorpay"
+              ? hostedCheckout
                 ? "Waiting for payment…"
                 : "Placing order…"
-              : paymentMethod === "razorpay"
-                ? `Pay ${formatMoney(quote.total, currency)} · Razorpay`
+              : hostedCheckout
+                ? `Pay ${formatMoney(quote.total, currency)} · ${selectedMethod?.label ?? "Online"}`
                 : `Place order · ${formatMoney(quote.total, currency)}`}
           </Button>
         </div>
 
         <aside className="shop-checkout-summary">
           <h2>Order summary</h2>
+          <div className="shop-promo">
+            {quote.coupon?.valid ? (
+              <div className="shop-promo-applied">
+                <span>
+                  <span className="badge ok">{quote.coupon.code}</span>{" "}
+                  {quote.coupon.description ?? "Promo code applied"}
+                </span>
+                <button
+                  type="button"
+                  className="shop-text-link"
+                  onClick={() => dropPromo.mutate()}
+                  disabled={dropPromo.isPending}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="shop-promo-form">
+                <Input
+                  value={promoCode}
+                  onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+                  placeholder="Promo code"
+                  aria-label="Promo code"
+                />
+                <Button
+                  variant="secondary"
+                  onClick={() => applyPromo.mutate(promoCode.trim())}
+                  disabled={!promoCode.trim() || applyPromo.isPending}
+                >
+                  {applyPromo.isPending ? "Checking…" : "Apply"}
+                </Button>
+              </div>
+            )}
+            {applyPromo.isError ? (
+              <p className="error-text">{(applyPromo.error as Error).message}</p>
+            ) : null}
+            {quote.coupon && !quote.coupon.valid && quote.coupon.message ? (
+              <p className="shop-hint">{quote.coupon.message}</p>
+            ) : null}
+          </div>
           <div className="shop-summary-items">
             {cart.data.items.map((item) => (
               <div key={item.id} className="shop-summary-item">
@@ -344,9 +452,23 @@ export function CheckoutPage() {
                 <span>{formatMoney(quote.tax_total, currency)}</span>
               </div>
             )}
+            {Number(quote.discount_total) > 0 ? (
+              <div>
+                <span className="muted">
+                  Discount{quote.coupon?.code ? ` · ${quote.coupon.code}` : ""}
+                </span>
+                <span>-{formatMoney(quote.discount_total, currency)}</span>
+              </div>
+            ) : null}
             <div>
-              <span className="muted">Shipping</span>
-              <span>{Number(quote.shipping_total) > 0 ? formatMoney(quote.shipping_total, currency) : "Free"}</span>
+              <span className="muted">
+                Shipping{selectedShipping ? ` · ${selectedShipping.label}` : ""}
+              </span>
+              <span>
+                {Number(selectedShipping?.price ?? quote.shipping_total) > 0
+                  ? formatMoney(selectedShipping?.price ?? quote.shipping_total, currency)
+                  : "Free"}
+              </span>
             </div>
             <div className="shop-cart-total">
               <span>Total</span>

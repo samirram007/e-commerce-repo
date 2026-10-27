@@ -47,19 +47,85 @@ def get_invoice_lines(session: Session, invoice_id: str) -> list[InvoiceLine]:
     )
 
 
+def _split_order_discount(
+    session: Session,
+    *,
+    company_id: str,
+    lines: list[dict],
+    order_discount,
+    currency: str,
+    invoice_date: date,
+    precision: int,
+) -> list[Decimal]:
+    """Spread an order-level discount across the lines in proportion to value.
+
+    Returns one share per line (the last absorbs the rounding remainder), so the
+    stored per-line discounts always add up to the requested amount.
+    """
+    zeros = [Decimal("0") for _ in lines]
+    if order_discount <= 0:
+        return zeros
+    from app.modules.catalog.models import Product
+
+    nets: list[Decimal] = []
+    for line in lines:
+        qty = dec(line.get("qty", 0))
+        raw_price = line.get("unit_price")
+        if raw_price is None and line.get("product_id"):
+            product = session.get(Product, line["product_id"])
+            raw_price = (
+                catalog.resolve_price(session, product, currency=currency, on_date=invoice_date)
+                if product
+                else Decimal("0")
+            )
+        nets.append(max(qty * dec(raw_price or 0), Decimal("0")))
+    total = sum(nets, Decimal("0"))
+    if total <= 0:
+        raise BusinessRuleError(
+            "BAD_DISCOUNT", "An order discount needs invoice lines with a value"
+        )
+    if money(order_discount, precision) > money(total, precision):
+        raise BusinessRuleError(
+            "DISCOUNT_EXCEEDS", "The order discount cannot exceed the invoice subtotal"
+        )
+    shares = [money(order_discount * net / total, precision) for net in nets]
+    remainder = money(order_discount, precision) - sum(shares, Decimal("0"))
+    if remainder:
+        shares[-1] = money(shares[-1] + remainder, precision)
+    return shares
+
+
 def create_invoice(
     session: Session, *, company_id: str, actor_user_id: str, customer_id: str,
     invoice_date: date, currency: str, lines: list[dict],
     shipping_total=Decimal("0"), notes: str | None = None, due_date: date | None = None,
     order_id: str | None = None, source: str = "manual",
-    customer_address: str | None = None,
+    customer_address: str | None = None, discount=Decimal("0"),
 ) -> CustomerInvoice:
-    """Create a draft invoice; totals are computed server-side from lines."""
+    """Create a draft invoice; totals are computed server-side from lines.
+
+    A manual order-level `discount` is spread across the lines in proportion to
+    their value, so every line is taxed on its own discounted amount and the
+    stored per-line discounts add up to the invoice total — the same shape a
+    coupon produces.
+    """
     customer = partners.get_customer(session, company_id, customer_id)
     if not lines:
         raise BusinessRuleError("NO_LINES", "Invoice needs at least one line")
     company = _company(session, company_id)
     precision = 2
+    order_discount = dec(discount)
+    if order_discount < 0:
+        raise BusinessRuleError("BAD_DISCOUNT", "Discount cannot be negative")
+    line_shares = _split_order_discount(
+        session,
+        company_id=company_id,
+        lines=lines,
+        order_discount=order_discount,
+        currency=currency,
+        invoice_date=invoice_date,
+        precision=precision,
+    )
     invoice = CustomerInvoice(
         company_id=company_id,
         doc_number=allocate_number(session, company_id, "invoice"),
@@ -79,7 +145,7 @@ def create_invoice(
     tax_total = Decimal("0")
     discount_total = Decimal("0")
     line_number = 1
-    for line in lines:
+    for index, line in enumerate(lines):
         product_id = line.get("product_id")
         product = None
         if product_id:
@@ -93,7 +159,7 @@ def create_invoice(
         unit_price = dec(line.get("unit_price", 0) if line.get("unit_price") is not None else (
             catalog.resolve_price(session, product, currency=currency, on_date=invoice_date) if product else Decimal("0")
         ))
-        discount = dec(line.get("discount", 0))
+        discount = dec(line.get("discount", 0)) + line_shares[index]
         tax_rate_id = line.get("tax_rate_id")
         tax_percentage = dec(taxes.get_tax_rate(session, company_id, tax_rate_id).percentage) if tax_rate_id else line.get("tax_percentage", 0)
         taxable = qty * unit_price - discount

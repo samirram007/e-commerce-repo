@@ -226,7 +226,10 @@ def get_order(order_id: str, ctx: CompanyCtx = Depends(guard(P_SALES_VIEW)), ses
     data["lines"] = [
         {
             "id": l.id, "product_id": l.product_id, "sku": l.sku_snapshot,
+            "description": l.description_snapshot,
             "qty": str(l.qty), "unit_price": str(l.unit_price),
+            # line discount (manual or allocated coupon) is what the invoice bills
+            "discount": str(l.discount), "tax_percentage": str(l.tax_percentage),
             "line_total": str(l.line_total), "tax_amount": str(l.tax_amount),
         }
         for l in lines
@@ -253,6 +256,8 @@ def _order_brief(order: SalesOrder) -> dict:
         "order_date": str(order.order_date),
         "currency": order.currency,
         "subtotal": str(order.subtotal),
+        "discount_total": str(order.discount_total),
+        "coupon_code": order.coupon_code,
         "tax_total": str(order.tax_total),
         "shipping_total": str(order.shipping_total),
         "total": str(order.total),

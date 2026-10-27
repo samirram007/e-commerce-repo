@@ -3,13 +3,40 @@ payment vouchers with allocations to invoices/bills."""
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Numeric, String, Text, UniqueConstraint, Boolean
+from sqlalchemy import Date, DateTime, Integer, Numeric, String, Text, UniqueConstraint, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.security import new_id
 from app.db.base import Base, CreatedByMixin, TimestampMixin
 
 PAYMENT_DIRECTIONS = ["receipt", "payment"]  # receipt: money in; payment: money out
+
+GATEWAY_MODES = ["test", "live"]
+
+
+class PaymentGateway(Base, TimestampMixin, CreatedByMixin):
+    """A company's configuration for one payment provider (admin panel).
+
+    `credentials` holds the provider secrets, stored as a JSON object and never
+    returned by the API (only the names of the keys that are set). `settings`
+    holds the admin's checkout customisation — which instruments to offer,
+    order value limits, the note shown at checkout and any extra key/values they
+    add — applied when the storefront builds its payment method list.
+    """
+    __tablename__ = "payment_gateways"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(80), nullable=True)  # override the provider's name
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mode: Mapped[str] = mapped_column(String(8), nullable=False, default="test")  # test|live
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)  # display order at checkout
+    credentials: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    settings: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (UniqueConstraint("company_id", "provider", name="uq_payment_gateway_company_provider"),)
 
 
 class PaymentRecord(Base, TimestampMixin, CreatedByMixin):

@@ -24,6 +24,8 @@ class Cart(Base, TimestampMixin):
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open", index=True)
     token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    #: promo code the shopper applied to this cart; re-priced on every quote
+    coupon_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     updated_at_2: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -48,6 +50,8 @@ class SalesOrder(Base, TimestampMixin, CreatedByMixin):
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending_payment", index=True)
     payment_state: Mapped[str] = mapped_column(String(20), nullable=False, default="unpaid", index=True)  # unpaid|paid|refunded|partial
+    #: When the shipment was delivered — the shopper's return window starts here.
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="INR")
     exchange_rate: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("1"))
@@ -61,6 +65,9 @@ class SalesOrder(Base, TimestampMixin, CreatedByMixin):
     total: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
     total_base: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, default=Decimal("0"))
     invoice_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("customer_invoices.id"), nullable=True, index=True)
+    #: coupon snapshot: which code was used and what it took off (`discount_total`)
+    coupon_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    coupon_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     cart_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { OrderFeedbackPanel } from "./OrderFeedbackPanel";
 import {
   cancelOrder,
   createRazorpayOrder,
@@ -183,6 +185,7 @@ export function OrdersPage() {
   const [error, setError] = useState<unknown>(null);
   const [confirmCancel, setConfirmCancel] = useState<string | null>(null);
   const [returning, setReturning] = useState<string | null>(null);
+  const [feedbackFor, setFeedbackFor] = useState<string | null>(null);
 
   const cancel = useMutation({
     mutationFn: (orderId: string) => cancelOrder(orderId),
@@ -326,10 +329,34 @@ export function OrdersPage() {
                 {returnable && returning !== order.id ? (
                   <ReturnAction order={order} onOpen={() => setReturning(order.id)} />
                 ) : null}
+
+                {order.payment_state === "paid" ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setFeedbackFor(feedbackFor === order.id ? null : order.id)}
+                  >
+                    {order.can_review ? "Rate & review" : "Order feedback"}
+                  </Button>
+                ) : null}
+
+                {order.status === "delivered" ? (
+                  <span className="muted shop-order-hint">
+                    {order.return_by
+                      ? `Returns accepted until ${new Date(order.return_by).toLocaleDateString()} · `
+                      : ""}
+                    <Link to="/policies/$slug" params={{ slug: "returns" }} className="shop-text-link">
+                      Return policy
+                    </Link>
+                  </span>
+                ) : null}
               </div>
 
               {returning === order.id ? (
                 <ReturnForm order={order} onClose={() => setReturning(null)} />
+              ) : null}
+
+              {feedbackFor === order.id ? (
+                <OrderFeedbackPanel order={order} onClose={() => setFeedbackFor(null)} />
               ) : null}
             </div>
           );

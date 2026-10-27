@@ -306,6 +306,17 @@ button.ghost { background: transparent; color: var(--accent-text); padding: 4px 
 .empty-title { font-weight: 600; margin-bottom: 4px; }
 .error-banner { background: #fde5e5; color: #b02a2a; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 
+/* ---- payment gateway panel ---- */
+.gateway-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+.gateway-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 6px; }
+.gateway-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 12px; }
+.gateway-fields, .measure-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.gateway-instruments { display: flex; flex-wrap: wrap; gap: 6px; }
+.gateway-extra { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; margin-bottom: 8px; }
+.gateway-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid #e2e8f0; border-radius: 999px; font-size: 13px; cursor: pointer; user-select: none; }
+.gateway-chip.on { border-color: #2f54eb; background: #eef2ff; color: #2f54eb; font-weight: 600; }
+.section-title { margin: 18px 0 6px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+
 /* ---- tabs ---- */
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid #e3e7ef; margin-bottom: 14px; flex-wrap: wrap; }
 .tab { background: transparent; color: #5a6478; border-radius: 8px 8px 0 0; padding: 8px 12px; }
@@ -1070,6 +1081,18 @@ button.ghost { background: transparent; color: var(--accent-text); padding: 4px 
 .shop-summary-item { display: flex; justify-content: space-between; gap: 14px; font-size: 13px; }
 .shop-summary-item > span:last-child { white-space: nowrap; }
 .shop-checkout-summary .shop-cart-totals { max-width: none; margin-left: 0; }
+/* -- promo code -- */
+.shop-promo { display: flex; flex-direction: column; gap: 8px; }
+.shop-promo-form { display: flex; gap: 8px; align-items: center; }
+.shop-promo-form input { flex: 1; min-width: 0; text-transform: uppercase; }
+.shop-promo-applied {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.shop-promo-applied .badge { margin-right: 6px; }
 .shop-checkout-form {
   display: flex;
   flex-direction: column;

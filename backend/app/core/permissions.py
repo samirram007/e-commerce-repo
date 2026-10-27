@@ -36,16 +36,27 @@ P_INVOICES_MANAGE = "invoicing.manage"
 P_INVOICES_VIEW = "invoicing.view"
 P_PAYMENTS_MANAGE = "payments.manage"
 P_PAYMENTS_VIEW = "payments.view"
+P_GATEWAYS_MANAGE = "payments.gateways.manage"
+P_GATEWAYS_VIEW = "payments.gateways.view"
 P_RETURNS_MANAGE = "returns.manage"
+P_CARRIERS_MANAGE = "delivery.carriers.manage"
+P_CARRIERS_VIEW = "delivery.carriers.view"
 P_STORAGE_MANAGE = "storage.manage"
 P_COMPANY_SETTINGS = "company.settings.manage"
 P_MEMBERS_MANAGE = "company.members.manage"
 P_FILES_UPLOAD = "files.upload"
+P_FILES_VIEW = "files.view"
+P_FILES_MANAGE = "files.manage"
+P_FILES_DELETE = "files.delete"
 P_CART_CHECKOUT = "storefront.cart.use"
 P_STOREFRONT_VIEW = "storefront.view"
 P_STOREFRONT_MANAGE = "storefront.manage"
 P_PAYROLL_MANAGE = "payroll.manage"
 P_PAYROLL_VIEW = "payroll.view"
+P_PROMOTIONS_MANAGE = "promotions.manage"
+P_PROMOTIONS_VIEW = "promotions.view"
+P_FEEDBACK_MANAGE = "feedback.manage"
+P_FEEDBACK_VIEW = "feedback.view"
 
 ALL_PERMISSIONS: dict[str, str] = {
     PERMISSION_VIEW_AUDIT_LOG: "View audit log",
@@ -71,16 +82,27 @@ ALL_PERMISSIONS: dict[str, str] = {
     P_INVOICES_VIEW: "View invoices/credit notes",
     P_PAYMENTS_MANAGE: "Record/allocate payments",
     P_PAYMENTS_VIEW: "View payments",
+    P_GATEWAYS_MANAGE: "Configure payment gateways",
+    P_GATEWAYS_VIEW: "View payment gateway configuration",
     P_RETURNS_MANAGE: "Manage returns/refunds",
+    P_CARRIERS_MANAGE: "Configure shipping carriers",
+    P_CARRIERS_VIEW: "View shipping carrier configuration",
     P_STORAGE_MANAGE: "Manage warehouses/locations",
     P_COMPANY_SETTINGS: "Manage company settings",
     P_MEMBERS_MANAGE: "Manage company members",
     P_FILES_UPLOAD: "Upload files",
+    P_FILES_VIEW: "Browse and download files",
+    P_FILES_MANAGE: "Manage folders, versions, shares and trash",
+    P_FILES_DELETE: "Permanently delete files and folders",
     P_CART_CHECKOUT: "Use storefront cart/checkout",
     P_STOREFRONT_VIEW: "View storefront content",
     P_STOREFRONT_MANAGE: "Manage storefront content and media",
     P_PAYROLL_MANAGE: "Manage employees and payroll runs",
     P_PAYROLL_VIEW: "View payroll and payslips",
+    P_PROMOTIONS_MANAGE: "Manage coupons and promotions",
+    P_PROMOTIONS_VIEW: "View coupons and redemptions",
+    P_FEEDBACK_MANAGE: "Moderate product reviews",
+    P_FEEDBACK_VIEW: "View purchase feedback",
 }
 
 # ---- permission groups used to compose role templates ----
@@ -90,16 +112,21 @@ COMPANY_PERMISSIONS: list[str] = [
     P_FISCAL_MANAGE, P_CATALOG_MANAGE, P_CATALOG_VIEW, P_PARTNERS_MANAGE,
     P_SALES_ORDER_CREATE, P_SALES_VIEW, P_SALES_FULFILL, P_PURCHASE_CREATE,
     P_PURCHASE_APPROVE, P_PURCHASE_VIEW, P_BILL_MANAGE, P_INVENTORY_MANAGE,
-    P_INVENTORY_VIEW, P_INVOICES_MANAGE, P_INVOICES_VIEW, P_PAYMENTS_MANAGE,
-    P_PAYMENTS_VIEW, P_RETURNS_MANAGE, P_STORAGE_MANAGE,    P_COMPANY_SETTINGS, P_MEMBERS_MANAGE, P_FILES_UPLOAD, P_CART_CHECKOUT,
+    P_INVENTORY_VIEW, P_INVOICES_MANAGE,    P_INVOICES_VIEW, P_PAYMENTS_MANAGE,
+    P_PAYMENTS_VIEW, P_GATEWAYS_MANAGE, P_GATEWAYS_VIEW,
+    P_RETURNS_MANAGE, P_CARRIERS_MANAGE, P_CARRIERS_VIEW, P_STORAGE_MANAGE,
+    P_COMPANY_SETTINGS, P_MEMBERS_MANAGE, P_FILES_UPLOAD, P_CART_CHECKOUT,
+    P_FILES_VIEW, P_FILES_MANAGE, P_FILES_DELETE,
     P_PAYROLL_MANAGE, P_PAYROLL_VIEW, P_STOREFRONT_VIEW, P_STOREFRONT_MANAGE,
+    P_PROMOTIONS_MANAGE, P_PROMOTIONS_VIEW, P_FEEDBACK_MANAGE, P_FEEDBACK_VIEW,
 ]
 
 # Read-only subset used by the "Other User" tier.
 READ_ONLY_PERMISSIONS: list[str] = [
     P_CATALOG_VIEW, P_INVENTORY_VIEW, P_SALES_VIEW, P_PURCHASE_VIEW,
-    P_INVOICES_VIEW, P_PAYMENTS_VIEW, P_REPORTS_VIEW, P_PAYROLL_VIEW,
-    P_STOREFRONT_VIEW,
+    P_INVOICES_VIEW, P_PAYMENTS_VIEW, P_GATEWAYS_VIEW, P_REPORTS_VIEW, P_PAYROLL_VIEW,
+    P_STOREFRONT_VIEW, P_PROMOTIONS_VIEW, P_CARRIERS_VIEW, P_FEEDBACK_VIEW,
+    P_FILES_VIEW,
 ]
 
 # Assignable user tiers (Developer / Admin / Other User).
@@ -134,8 +161,8 @@ ROLE_TEMPLATES: dict[str, list[str]] = {
     "accountant": [
         P_ACCOUNTS_MANAGE, P_JOURNAL_POST, P_JOURNAL_VIEW, P_REPORTS_VIEW,
         P_FISCAL_MANAGE, P_INVOICES_MANAGE, P_INVOICES_VIEW, P_PAYMENTS_MANAGE,
-        P_PAYMENTS_VIEW, P_RETURNS_MANAGE, P_INVENTORY_VIEW, P_SALES_VIEW, P_PURCHASE_VIEW,
-        P_PAYROLL_MANAGE, P_PAYROLL_VIEW,
+        P_PAYMENTS_VIEW, P_GATEWAYS_VIEW, P_RETURNS_MANAGE, P_INVENTORY_VIEW, P_SALES_VIEW, P_PURCHASE_VIEW,
+        P_PAYROLL_MANAGE, P_PAYROLL_VIEW, P_PROMOTIONS_VIEW, P_FILES_VIEW,
     ],
     "inventory_manager": [
         P_INVENTORY_MANAGE, P_INVENTORY_VIEW, P_CATALOG_MANAGE, P_CATALOG_VIEW,
@@ -143,12 +170,13 @@ ROLE_TEMPLATES: dict[str, list[str]] = {
     ],
     "sales_agent": [
         P_CATALOG_VIEW, P_CART_CHECKOUT, P_SALES_ORDER_CREATE, P_SALES_VIEW,
-        P_PARTNERS_MANAGE, P_SALES_FULFILL, P_STOREFRONT_VIEW,
+        P_PARTNERS_MANAGE, P_SALES_FULFILL, P_STOREFRONT_VIEW, P_PROMOTIONS_VIEW,
+        P_FEEDBACK_VIEW, P_FILES_VIEW, P_FILES_UPLOAD,
     ],
     "purchasing_agent": [
         P_CATALOG_VIEW, P_PURCHASE_CREATE, P_PURCHASE_VIEW, P_BILL_MANAGE, P_PARTNERS_MANAGE,
     ],
-    "fulfillment_agent": [P_SALES_FULFILL, P_INVENTORY_VIEW, P_CATALOG_VIEW],
+    "fulfillment_agent": [P_SALES_FULFILL, P_INVENTORY_VIEW, P_CATALOG_VIEW, P_CARRIERS_VIEW],
     # ---- assignable user tiers ----
     "developer": COMPANY_PERMISSIONS + [PERMISSION_MANAGE_USERS, PERMISSION_VIEW_AUDIT_LOG],
     "admin": COMPANY_PERMISSIONS,

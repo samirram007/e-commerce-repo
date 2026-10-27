@@ -204,6 +204,27 @@ def cancel_order_with_refund(
     }
 
 
+def return_window_days(session: Session, company_id: str) -> int:
+    """The shop's return window in days (0 when the shop accepts returns always)."""
+    from app.modules.storefront.models import StorefrontSettings
+
+    row = session.scalar(
+        select(StorefrontSettings).where(StorefrontSettings.company_id == company_id)
+    )
+    return int(row.return_window_days or 0) if row is not None else 0
+
+
+def return_cutoff(session: Session, company_id: str, order) -> datetime | None:
+    """Last moment a return may be requested for this order (None = no limit)."""
+    from datetime import timedelta
+
+    window = return_window_days(session, company_id)
+    delivered_at = getattr(order, "delivered_at", None)
+    if window <= 0 or delivered_at is None:
+        return None
+    return delivered_at + timedelta(days=window)
+
+
 def request_order_return(
     session: Session, *, company_id: str, order_id: str, actor_user_id: str | None,
     lines: list[dict], notes: str | None = None,
@@ -221,6 +242,13 @@ def request_order_return(
     if order.status != "delivered":
         raise BusinessRuleError(
             "NOT_DELIVERED", "Returns can be requested once the order is delivered"
+        )
+    cutoff = return_cutoff(session, company_id, order)
+    if cutoff is not None and datetime.now(timezone.utc) > cutoff:
+        raise BusinessRuleError(
+            "RETURN_WINDOW_EXPIRED",
+            f"Returns are accepted for {return_window_days(session, company_id)} days after delivery; "
+            f"this order's window closed on {cutoff.date().isoformat()}",
         )
     from app.modules.catalog.models import Product
 

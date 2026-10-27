@@ -44,6 +44,10 @@ const EMPTY_FORM: ProductFormInput = {
   track_serials: false,
   base_cost: "0",
   base_price: "0",
+  weight_kg: "",
+  length_cm: "",
+  width_cm: "",
+  height_cm: "",
   is_sellable: true,
   is_purchasable: true,
   is_active: true,
@@ -63,6 +67,10 @@ function formFromProduct(product: Product): ProductFormInput {
     track_serials: product.track_serials,
     base_cost: product.base_cost,
     base_price: product.base_price,
+    weight_kg: product.weight_kg ?? "",
+    length_cm: product.length_cm ?? "",
+    width_cm: product.width_cm ?? "",
+    height_cm: product.height_cm ?? "",
     is_sellable: product.is_sellable,
     is_purchasable: product.is_purchasable,
     is_active: product.is_active,
@@ -391,6 +399,42 @@ export function ProductsPage() {
             <Input
               value={form.base_price}
               onChange={(event) => setField("base_price", event.target.value)}
+            />
+          </Field>
+        </div>
+        <h3 className="section-title">Shipping</h3>
+        <p className="muted">
+          Carriers rate a parcel by its weight and size; leave a field blank if it does not apply
+          (services need no measurements).
+        </p>
+        <div className="measure-grid">
+          <Field label="Weight (kg)" error={errors.weight_kg}>
+            <Input
+              value={form.weight_kg}
+              inputMode="decimal"
+              placeholder="0.500"
+              onChange={(event) => setField("weight_kg", event.target.value)}
+            />
+          </Field>
+          <Field label="Length (cm)" error={errors.length_cm}>
+            <Input
+              value={form.length_cm}
+              inputMode="decimal"
+              onChange={(event) => setField("length_cm", event.target.value)}
+            />
+          </Field>
+          <Field label="Width (cm)" error={errors.width_cm}>
+            <Input
+              value={form.width_cm}
+              inputMode="decimal"
+              onChange={(event) => setField("width_cm", event.target.value)}
+            />
+          </Field>
+          <Field label="Height (cm)" error={errors.height_cm}>
+            <Input
+              value={form.height_cm}
+              inputMode="decimal"
+              onChange={(event) => setField("height_cm", event.target.value)}
             />
           </Field>
         </div>

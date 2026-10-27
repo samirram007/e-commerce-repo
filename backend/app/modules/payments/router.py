@@ -8,10 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessRuleError, NotFoundError
-from app.core.permissions import P_PAYMENTS_MANAGE, P_PAYMENTS_VIEW
+from app.core.permissions import (
+    P_GATEWAYS_MANAGE,
+    P_GATEWAYS_VIEW,
+    P_PAYMENTS_MANAGE,
+    P_PAYMENTS_VIEW,
+)
 from app.db.unit_of_work import get_db
 from app.modules.audit.service import log_action
 from app.modules.identity.dependencies import CompanyCtx, guard
+from app.modules.payments import gateways as gateway_svc
 from app.modules.payments import service as svc
 from app.modules.payments.models import PaymentAllocation, PaymentRecord
 
@@ -40,6 +46,23 @@ class RefundIn(BaseModel):
     amount: Decimal = Field(gt=0)
 
 
+class GatewayIn(BaseModel):
+    """Admin panel payload for one provider.
+
+    `credentials` is write-only (a blank value keeps the stored secret),
+    `settings` carries the checkout customisation including any extra
+    key/values the admin added.
+    """
+
+    is_enabled: bool | None = None
+    mode: str | None = None
+    priority: int | None = None
+    label: str | None = Field(default=None, max_length=80)
+    credentials: dict[str, str] | None = None
+    settings: dict | None = None
+    notes: str | None = None
+
+
 class PaymentOut(BaseModel):
     id: str
     direction: str
@@ -59,6 +82,62 @@ def _out(r: PaymentRecord) -> PaymentOut:
         method=r.method, status=r.status, amount=r.amount, currency=r.currency,
         occurred_at=r.occurred_at, order_id=r.order_id,
     )
+
+
+@router.get("/gateways")
+def list_gateways(
+    ctx: CompanyCtx = Depends(guard(P_GATEWAYS_VIEW)), session: Session = Depends(get_db)
+):
+    """The provider catalog plus this company's configuration for each one."""
+    return {"providers": gateway_svc.provider_catalog(), "gateways": gateway_svc.overview(session, ctx.company_id)}
+
+
+@router.put("/gateways/{provider}")
+def save_gateway(
+    provider: str,
+    payload: GatewayIn,
+    ctx: CompanyCtx = Depends(guard(P_GATEWAYS_MANAGE)),
+    session: Session = Depends(get_db),
+):
+    """Enable/disable a gateway and store its credentials and checkout options."""
+    row = gateway_svc.save(
+        session,
+        company_id=ctx.company_id,
+        actor_user_id=ctx.user.id,
+        provider=provider,
+        payload=payload.model_dump(exclude_unset=True),
+    )
+    log_action(
+        session,
+        action="payment.gateway.updated",
+        entity_type="payment_gateway",
+        entity_id=row.id,
+        actor_user_id=ctx.user.id,
+        company_id=ctx.company_id,
+        after_data={"provider": row.provider, "enabled": row.is_enabled, "mode": row.mode},
+    )
+    return next(
+        entry for entry in gateway_svc.overview(session, ctx.company_id) if entry["provider"] == provider
+    )
+
+
+@router.delete("/gateways/{provider}")
+def delete_gateway(
+    provider: str,
+    ctx: CompanyCtx = Depends(guard(P_GATEWAYS_MANAGE)),
+    session: Session = Depends(get_db),
+):
+    """Drop a company's configuration for a provider (secrets included)."""
+    gateway_svc.remove(session, ctx.company_id, provider)
+    log_action(
+        session,
+        action="payment.gateway.removed",
+        entity_type="payment_gateway",
+        entity_id=provider,
+        actor_user_id=ctx.user.id,
+        company_id=ctx.company_id,
+    )
+    return {"deleted": provider}
 
 
 @router.get("", response_model=list[PaymentOut])

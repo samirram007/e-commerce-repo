@@ -85,6 +85,11 @@ class Product(Base, TimestampMixin, CreatedByMixin):
     # ---- storefront presentation fields ----
     # `base_price` stays the selling price; `compare_at_price` is the optional
     # pre-discount anchor used to compute the discount server-side.
+    # ---- shipping: carriers rate a parcel by its weight and dimensions ----
+    weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(10, 3), nullable=True)
+    length_cm: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    width_cm: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    height_cm: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     compare_at_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     badge: Mapped[str | None] = mapped_column(String(16), nullable=True)  # New|Sale|Bestseller|Limited
     highlights: Mapped[list | None] = mapped_column(JSON, nullable=True)  # list[str]

@@ -10,6 +10,7 @@ import {
   shopKeys,
 } from "./queries";
 import { ProductCard } from "./ProductCard";
+import { ReviewsSection } from "./ReviewsSection";
 import { ProductImage } from "./ProductImage";
 import { Button, EmptyState, Field, Input, Spinner } from "../../components/ui";
 import { formatMoney } from "../../lib/format";
@@ -172,6 +173,10 @@ export function ProductDetailPage({ productId: productIdProp }: { productId?: st
           </div>
         </div>
       </div>
+
+      <section className="shop-section shop-section-reviews">
+        <ReviewsSection productId={p.id} />
+      </section>
 
       {p.related && p.related.length > 0 ? (
         <section className="shop-section">

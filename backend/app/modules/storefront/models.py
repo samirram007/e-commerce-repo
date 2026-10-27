@@ -127,6 +127,8 @@ class StorefrontSettings(Base, TimestampMixin, CreatedByMixin):
     # shipping rules (None = rule disabled → shipping is free)
     free_shipping_threshold: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     flat_shipping_fee: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    #: How many days after delivery a shopper may request a return (0 = no limit).
+    return_window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7, server_default="7")
     # contact block
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)

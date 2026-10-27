@@ -18,13 +18,16 @@ import { Route as GuestRegisterRouteImport } from './routes/_guest/register'
 import { Route as ProtectedAccountingRouteImport } from './routes/_protected/accounting'
 import { Route as ProtectedAuditRouteImport } from './routes/_protected/audit'
 import { Route as ProtectedDashboardRouteImport } from './routes/_protected/dashboard'
+import { Route as ProtectedFeedbackRouteImport } from './routes/_protected/feedback'
 import { Route as ProtectedInventoryRouteImport } from './routes/_protected/inventory'
 import { Route as ProtectedInvoicesRouteImport } from './routes/_protected/invoices'
 import { Route as ProtectedOrdersRouteImport } from './routes/_protected/orders'
 import { Route as ProtectedPartnersRouteImport } from './routes/_protected/partners'
+import { Route as ProtectedPaymentGatewaysRouteImport } from './routes/_protected/payment-gateways'
 import { Route as ProtectedPaymentsRouteImport } from './routes/_protected/payments'
 import { Route as ProtectedPayrollRouteImport } from './routes/_protected/payroll'
 import { Route as ProtectedProductsRouteImport } from './routes/_protected/products'
+import { Route as ProtectedPromotionsRouteImport } from './routes/_protected/promotions'
 import { Route as ProtectedPurchaseOrdersRouteImport } from './routes/_protected/purchase-orders'
 import { Route as ProtectedReportsRouteImport } from './routes/_protected/reports'
 import { Route as ProtectedReturnsRouteImport } from './routes/_protected/returns'
@@ -32,6 +35,7 @@ import { Route as ProtectedRolesRouteImport } from './routes/_protected/roles'
 import { Route as ProtectedSettingsRouteImport } from './routes/_protected/settings'
 import { Route as ProtectedSetupRouteImport } from './routes/_protected/setup'
 import { Route as ProtectedShipmentsRouteImport } from './routes/_protected/shipments'
+import { Route as ProtectedShippingCarriersRouteImport } from './routes/_protected/shipping-carriers'
 import { Route as ProtectedUsersRouteImport } from './routes/_protected/users'
 import { Route as ShopIndexRouteImport } from './routes/_shop/index'
 import { Route as ShopAboutRouteImport } from './routes/_shop/about'
@@ -91,6 +95,11 @@ const ProtectedDashboardRoute = ProtectedDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedFeedbackRoute = ProtectedFeedbackRouteImport.update({
+  id: '/feedback',
+  path: '/feedback',
+  getParentRoute: () => ProtectedRoute,
+} as any)
 const ProtectedInventoryRoute = ProtectedInventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
@@ -111,6 +120,12 @@ const ProtectedPartnersRoute = ProtectedPartnersRouteImport.update({
   path: '/partners',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedPaymentGatewaysRoute =
+  ProtectedPaymentGatewaysRouteImport.update({
+    id: '/payment-gateways',
+    path: '/payment-gateways',
+    getParentRoute: () => ProtectedRoute,
+  } as any)
 const ProtectedPaymentsRoute = ProtectedPaymentsRouteImport.update({
   id: '/payments',
   path: '/payments',
@@ -124,6 +139,11 @@ const ProtectedPayrollRoute = ProtectedPayrollRouteImport.update({
 const ProtectedProductsRoute = ProtectedProductsRouteImport.update({
   id: '/products',
   path: '/products',
+  getParentRoute: () => ProtectedRoute,
+} as any)
+const ProtectedPromotionsRoute = ProtectedPromotionsRouteImport.update({
+  id: '/promotions',
+  path: '/promotions',
   getParentRoute: () => ProtectedRoute,
 } as any)
 const ProtectedPurchaseOrdersRoute = ProtectedPurchaseOrdersRouteImport.update({
@@ -161,6 +181,12 @@ const ProtectedShipmentsRoute = ProtectedShipmentsRouteImport.update({
   path: '/shipments',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedShippingCarriersRoute =
+  ProtectedShippingCarriersRouteImport.update({
+    id: '/shipping-carriers',
+    path: '/shipping-carriers',
+    getParentRoute: () => ProtectedRoute,
+  } as any)
 const ProtectedUsersRoute = ProtectedUsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -250,13 +276,16 @@ export interface FileRoutesByFullPath {
   '/accounting': typeof ProtectedAccountingRoute
   '/audit': typeof ProtectedAuditRoute
   '/dashboard': typeof ProtectedDashboardRoute
+  '/feedback': typeof ProtectedFeedbackRoute
   '/inventory': typeof ProtectedInventoryRoute
   '/invoices': typeof ProtectedInvoicesRoute
   '/orders': typeof ProtectedOrdersRoute
   '/partners': typeof ProtectedPartnersRoute
+  '/payment-gateways': typeof ProtectedPaymentGatewaysRoute
   '/payments': typeof ProtectedPaymentsRoute
   '/payroll': typeof ProtectedPayrollRoute
   '/products': typeof ProtectedProductsRoute
+  '/promotions': typeof ProtectedPromotionsRoute
   '/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/reports': typeof ProtectedReportsRoute
   '/returns': typeof ProtectedReturnsRoute
@@ -264,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ProtectedSettingsRoute
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
+  '/shipping-carriers': typeof ProtectedShippingCarriersRoute
   '/users': typeof ProtectedUsersRoute
   '/about': typeof ShopAboutRoute
   '/cart': typeof ShopCartRoute
@@ -288,13 +318,16 @@ export interface FileRoutesByTo {
   '/accounting': typeof ProtectedAccountingRoute
   '/audit': typeof ProtectedAuditRoute
   '/dashboard': typeof ProtectedDashboardRoute
+  '/feedback': typeof ProtectedFeedbackRoute
   '/inventory': typeof ProtectedInventoryRoute
   '/invoices': typeof ProtectedInvoicesRoute
   '/orders': typeof ProtectedOrdersRoute
   '/partners': typeof ProtectedPartnersRoute
+  '/payment-gateways': typeof ProtectedPaymentGatewaysRoute
   '/payments': typeof ProtectedPaymentsRoute
   '/payroll': typeof ProtectedPayrollRoute
   '/products': typeof ProtectedProductsRoute
+  '/promotions': typeof ProtectedPromotionsRoute
   '/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/reports': typeof ProtectedReportsRoute
   '/returns': typeof ProtectedReturnsRoute
@@ -302,6 +335,7 @@ export interface FileRoutesByTo {
   '/settings': typeof ProtectedSettingsRoute
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
+  '/shipping-carriers': typeof ProtectedShippingCarriersRoute
   '/users': typeof ProtectedUsersRoute
   '/about': typeof ShopAboutRoute
   '/cart': typeof ShopCartRoute
@@ -328,13 +362,16 @@ export interface FileRoutesById {
   '/_protected/accounting': typeof ProtectedAccountingRoute
   '/_protected/audit': typeof ProtectedAuditRoute
   '/_protected/dashboard': typeof ProtectedDashboardRoute
+  '/_protected/feedback': typeof ProtectedFeedbackRoute
   '/_protected/inventory': typeof ProtectedInventoryRoute
   '/_protected/invoices': typeof ProtectedInvoicesRoute
   '/_protected/orders': typeof ProtectedOrdersRoute
   '/_protected/partners': typeof ProtectedPartnersRoute
+  '/_protected/payment-gateways': typeof ProtectedPaymentGatewaysRoute
   '/_protected/payments': typeof ProtectedPaymentsRoute
   '/_protected/payroll': typeof ProtectedPayrollRoute
   '/_protected/products': typeof ProtectedProductsRoute
+  '/_protected/promotions': typeof ProtectedPromotionsRoute
   '/_protected/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/_protected/reports': typeof ProtectedReportsRoute
   '/_protected/returns': typeof ProtectedReturnsRoute
@@ -342,6 +379,7 @@ export interface FileRoutesById {
   '/_protected/settings': typeof ProtectedSettingsRoute
   '/_protected/setup': typeof ProtectedSetupRoute
   '/_protected/shipments': typeof ProtectedShipmentsRoute
+  '/_protected/shipping-carriers': typeof ProtectedShippingCarriersRoute
   '/_protected/users': typeof ProtectedUsersRoute
   '/_shop/about': typeof ShopAboutRoute
   '/_shop/cart': typeof ShopCartRoute
@@ -369,13 +407,16 @@ export interface FileRouteTypes {
     | '/accounting'
     | '/audit'
     | '/dashboard'
+    | '/feedback'
     | '/inventory'
     | '/invoices'
     | '/orders'
     | '/partners'
+    | '/payment-gateways'
     | '/payments'
     | '/payroll'
     | '/products'
+    | '/promotions'
     | '/purchase-orders'
     | '/reports'
     | '/returns'
@@ -383,6 +424,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/shipments'
+    | '/shipping-carriers'
     | '/users'
     | '/about'
     | '/cart'
@@ -407,13 +449,16 @@ export interface FileRouteTypes {
     | '/accounting'
     | '/audit'
     | '/dashboard'
+    | '/feedback'
     | '/inventory'
     | '/invoices'
     | '/orders'
     | '/partners'
+    | '/payment-gateways'
     | '/payments'
     | '/payroll'
     | '/products'
+    | '/promotions'
     | '/purchase-orders'
     | '/reports'
     | '/returns'
@@ -421,6 +466,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/shipments'
+    | '/shipping-carriers'
     | '/users'
     | '/about'
     | '/cart'
@@ -446,13 +492,16 @@ export interface FileRouteTypes {
     | '/_protected/accounting'
     | '/_protected/audit'
     | '/_protected/dashboard'
+    | '/_protected/feedback'
     | '/_protected/inventory'
     | '/_protected/invoices'
     | '/_protected/orders'
     | '/_protected/partners'
+    | '/_protected/payment-gateways'
     | '/_protected/payments'
     | '/_protected/payroll'
     | '/_protected/products'
+    | '/_protected/promotions'
     | '/_protected/purchase-orders'
     | '/_protected/reports'
     | '/_protected/returns'
@@ -460,6 +509,7 @@ export interface FileRouteTypes {
     | '/_protected/settings'
     | '/_protected/setup'
     | '/_protected/shipments'
+    | '/_protected/shipping-carriers'
     | '/_protected/users'
     | '/_shop/about'
     | '/_shop/cart'
@@ -550,6 +600,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedDashboardRouteImport
       parentRoute: typeof ProtectedRoute
     }
+    '/_protected/feedback': {
+      id: '/_protected/feedback'
+      path: '/feedback'
+      fullPath: '/feedback'
+      preLoaderRoute: typeof ProtectedFeedbackRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
     '/_protected/inventory': {
       id: '/_protected/inventory'
       path: '/inventory'
@@ -578,6 +635,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedPartnersRouteImport
       parentRoute: typeof ProtectedRoute
     }
+    '/_protected/payment-gateways': {
+      id: '/_protected/payment-gateways'
+      path: '/payment-gateways'
+      fullPath: '/payment-gateways'
+      preLoaderRoute: typeof ProtectedPaymentGatewaysRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
     '/_protected/payments': {
       id: '/_protected/payments'
       path: '/payments'
@@ -597,6 +661,13 @@ declare module '@tanstack/react-router' {
       path: '/products'
       fullPath: '/products'
       preLoaderRoute: typeof ProtectedProductsRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
+    '/_protected/promotions': {
+      id: '/_protected/promotions'
+      path: '/promotions'
+      fullPath: '/promotions'
+      preLoaderRoute: typeof ProtectedPromotionsRouteImport
       parentRoute: typeof ProtectedRoute
     }
     '/_protected/purchase-orders': {
@@ -646,6 +717,13 @@ declare module '@tanstack/react-router' {
       path: '/shipments'
       fullPath: '/shipments'
       preLoaderRoute: typeof ProtectedShipmentsRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
+    '/_protected/shipping-carriers': {
+      id: '/_protected/shipping-carriers'
+      path: '/shipping-carriers'
+      fullPath: '/shipping-carriers'
+      preLoaderRoute: typeof ProtectedShippingCarriersRouteImport
       parentRoute: typeof ProtectedRoute
     }
     '/_protected/users': {
@@ -779,13 +857,16 @@ interface ProtectedRouteChildren {
   ProtectedAccountingRoute: typeof ProtectedAccountingRoute
   ProtectedAuditRoute: typeof ProtectedAuditRoute
   ProtectedDashboardRoute: typeof ProtectedDashboardRoute
+  ProtectedFeedbackRoute: typeof ProtectedFeedbackRoute
   ProtectedInventoryRoute: typeof ProtectedInventoryRoute
   ProtectedInvoicesRoute: typeof ProtectedInvoicesRoute
   ProtectedOrdersRoute: typeof ProtectedOrdersRoute
   ProtectedPartnersRoute: typeof ProtectedPartnersRoute
+  ProtectedPaymentGatewaysRoute: typeof ProtectedPaymentGatewaysRoute
   ProtectedPaymentsRoute: typeof ProtectedPaymentsRoute
   ProtectedPayrollRoute: typeof ProtectedPayrollRoute
   ProtectedProductsRoute: typeof ProtectedProductsRoute
+  ProtectedPromotionsRoute: typeof ProtectedPromotionsRoute
   ProtectedPurchaseOrdersRoute: typeof ProtectedPurchaseOrdersRoute
   ProtectedReportsRoute: typeof ProtectedReportsRoute
   ProtectedReturnsRoute: typeof ProtectedReturnsRoute
@@ -793,6 +874,7 @@ interface ProtectedRouteChildren {
   ProtectedSettingsRoute: typeof ProtectedSettingsRoute
   ProtectedSetupRoute: typeof ProtectedSetupRoute
   ProtectedShipmentsRoute: typeof ProtectedShipmentsRoute
+  ProtectedShippingCarriersRoute: typeof ProtectedShippingCarriersRoute
   ProtectedUsersRoute: typeof ProtectedUsersRoute
 }
 
@@ -800,13 +882,16 @@ const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedAccountingRoute: ProtectedAccountingRoute,
   ProtectedAuditRoute: ProtectedAuditRoute,
   ProtectedDashboardRoute: ProtectedDashboardRoute,
+  ProtectedFeedbackRoute: ProtectedFeedbackRoute,
   ProtectedInventoryRoute: ProtectedInventoryRoute,
   ProtectedInvoicesRoute: ProtectedInvoicesRoute,
   ProtectedOrdersRoute: ProtectedOrdersRoute,
   ProtectedPartnersRoute: ProtectedPartnersRoute,
+  ProtectedPaymentGatewaysRoute: ProtectedPaymentGatewaysRoute,
   ProtectedPaymentsRoute: ProtectedPaymentsRoute,
   ProtectedPayrollRoute: ProtectedPayrollRoute,
   ProtectedProductsRoute: ProtectedProductsRoute,
+  ProtectedPromotionsRoute: ProtectedPromotionsRoute,
   ProtectedPurchaseOrdersRoute: ProtectedPurchaseOrdersRoute,
   ProtectedReportsRoute: ProtectedReportsRoute,
   ProtectedReturnsRoute: ProtectedReturnsRoute,
@@ -814,6 +899,7 @@ const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedSettingsRoute: ProtectedSettingsRoute,
   ProtectedSetupRoute: ProtectedSetupRoute,
   ProtectedShipmentsRoute: ProtectedShipmentsRoute,
+  ProtectedShippingCarriersRoute: ProtectedShippingCarriersRoute,
   ProtectedUsersRoute: ProtectedUsersRoute,
 }
 

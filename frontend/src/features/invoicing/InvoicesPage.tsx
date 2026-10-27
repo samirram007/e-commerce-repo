@@ -68,6 +68,7 @@ function emptyInvoiceForm(): InvoiceFormInput {
     customer_address: "",
     currency: "INR",
     shipping_total: "0",
+    discount: "0",
     due_date: "",
     notes: "",
     order_id: null,
@@ -481,6 +482,17 @@ export function InvoicesPage() {
               onChange={(event) => setField("shipping_total", event.target.value)}
             />
           </Field>
+          <Field
+            label="Order discount"
+            error={errors.discount}
+            hint="Spread across the lines by value, so each line is taxed on its discounted amount"
+          >
+            <Input
+              value={form.discount}
+              placeholder="0"
+              onChange={(event) => setField("discount", event.target.value)}
+            />
+          </Field>
         </div>
         <Field label="Billing address (printed on the invoice)" error={errors.customer_address}>
           <Textarea
@@ -599,6 +611,12 @@ export function InvoicesPage() {
                 <div className="muted">Subtotal</div>
                 <div>{formatMoney(detail.subtotal, detail.currency)}</div>
               </div>
+              {Number(detail.discount_total) > 0 ? (
+                <div>
+                  <div className="muted">Discount</div>
+                  <div>-{formatMoney(detail.discount_total, detail.currency)}</div>
+                </div>
+              ) : null}
               <div>
                 <div className="muted">Tax</div>
                 {detail.tax_breakup.length > 0 ? (

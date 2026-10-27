@@ -78,8 +78,21 @@ export interface ShopQuoteLine {
   sku: string;
   qty: string;
   unit_price: string;
+  /** Coupon share taken off this line ("0.00" when none applies). */
+  discount?: string;
   tax_amount: string;
   line_total: string;
+}
+
+/** Promo code state of a cart quote: priced whether or not it is still usable. */
+export interface ShopCoupon {
+  code: string;
+  description: string | null;
+  discount_total: string;
+  valid: boolean;
+  /** Machine code + message explaining why a stored code is not applied. */
+  reason: string | null;
+  message: string | null;
 }
 
 /** Tax charged at one GST rate (the UI shows the CGST/SGST halves in the label). */
@@ -99,6 +112,8 @@ export interface ShopQuote {
   shipping_total: string;
   total: string;
   currency: string;
+  /** Null when no promo code is on the cart. */
+  coupon?: ShopCoupon | null;
 }
 
 export interface ShopCart {
@@ -114,8 +129,33 @@ export interface PaymentMethod {
   label: string;
   provider: string;
   available: boolean;
+  /**
+   * How the payment finishes: `hosted_modal` (provider window), `redirect`
+   * (provider page), `offline` (pay on delivery) or `sandbox` (local demo
+   * method). Comes straight from the gateway the admin enabled.
+   */
+  kind?: string;
+  mode?: string;
+  /** Instruments the admin left enabled for this gateway. */
+  methods?: string[];
+  /** Note the admin attached to this method, shown under the option. */
+  instructions?: string | null;
   /** Why an option is unavailable (e.g. "not_configured" for Razorpay without keys). */
   reason?: string | null;
+}
+
+/**
+ * A delivery option at checkout: the carriers the shop enabled (or its standard
+ * rule price when none is configured), priced and described as the admin set it.
+ */
+export interface ShopShippingOption {
+  code: string;
+  label: string;
+  price: string;
+  /** `carrier` (live quote), `rules`, or `rules_fallback` when a carrier could not quote. */
+  rate_source: string;
+  /** Carrier code to send back at checkout; null for the shop's standard option. */
+  carrier: string | null;
 }
 
 /** Gateway order returned by `POST /orders/{id}/razorpay`. */
@@ -195,6 +235,9 @@ export interface ShopOrder {
   order_date: string;
   currency: string;
   subtotal: string;
+  /** Coupon discount taken off the order ("0.0000" when none). */
+  discount_total?: string;
+  coupon_code?: string | null;
   tax_total: string;
   shipping_total: string;
   total: string;
@@ -207,6 +250,67 @@ export interface ShopOrder {
   payment_status?: string | null;
   email?: string;
   replayed?: boolean;
+  /** When the delivery landed — the return window starts here. */
+  delivered_at?: string | null;
+  /** Last day a return may be requested (null when the shop sets no window). */
+  return_by?: string | null;
+  /** True once the order is paid, i.e. its items can be reviewed. */
+  can_review?: boolean;
+}
+
+/** A published product review (approved reviews only reach the storefront). */
+export interface ShopReview {
+  id: string;
+  product_id: string;
+  order_id: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  status: string;
+  created_at: string | null;
+}
+
+export interface ShopReviewSummary {
+  average: string | null;
+  count: number;
+}
+
+export interface ShopProductReviews {
+  summary: ShopReviewSummary;
+  items: ShopReview[];
+}
+
+/** One purchasable line of an order, with what the shopper already reviewed. */
+export interface ShopReviewableItem {
+  product_id: string;
+  order_line_id: string | null;
+  sku: string;
+  name: string;
+  qty: string;
+  image_file_id: string | null;
+  reviewed: boolean;
+  review_status: string | null;
+  rating: number | null;
+  review_id: string | null;
+}
+
+/** Private order-experience feedback (delivery / packaging / service). */
+export interface ShopOrderFeedback {
+  id: string;
+  order_id: string;
+  delivery_rating: number | null;
+  packaging_rating: number | null;
+  service_rating: number | null;
+  comment: string | null;
+  created_at: string | null;
+}
+
+export interface ShopOrderFeedbackState {
+  order_id: string;
+  can_review: boolean;
+  items: ShopReviewableItem[];
+  reviews: ShopReview[];
+  order_feedback: ShopOrderFeedback | null;
 }
 
 export interface CheckoutPayload {
@@ -222,6 +326,8 @@ export interface CheckoutPayload {
     country?: string;
   };
   payment_method: string;
+  /** Carrier the shopper picked (see `fetchShippingOptions`); omitted for standard delivery. */
+  shipping_carrier?: string;
   shipping_total?: string;
   notes?: string;
 }

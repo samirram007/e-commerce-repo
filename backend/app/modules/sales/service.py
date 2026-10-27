@@ -19,6 +19,7 @@ from app.modules.invoicing import service as invoicing
 from app.modules.payments import service as payments
 from app.modules.payments.models import PaymentRecord
 from app.modules.partners import service as partners
+from app.modules.promotions import service as promotions
 from app.modules.sales.models import (
     ORDER_STATUSES,
     Cart,
@@ -125,33 +126,81 @@ def remove_cart_item(session: Session, cart: Cart, item_id: str) -> None:
     session.flush()
 
 
-def quote_cart(session: Session, cart: Cart, *, shipping_total=Decimal("0")) -> dict:
-    """Server-side authoritative quote: price + tax per line, totals overall."""
+def quote_cart(
+    session: Session,
+    cart: Cart,
+    *,
+    shipping_total=Decimal("0"),
+    customer_key: str | None = None,
+    strict_coupon: bool = False,
+) -> dict:
+    """Server-side authoritative quote: price + tax per line, totals overall.
+
+    The cart's own promo code is re-priced every time, so a code that stops
+    qualifying (minimum subtotal, redemption limit, expiry) simply stops being
+    applied — unless `strict_coupon` is set, which is what checkout uses to tell
+    the shopper why instead of quietly charging full price.
+    """
     company = _company(session, cart.company_id)
     default_tax_rate_id = taxes.default_sales_tax_id(session, company.id)
     default_tax = (
         dec(session.get(TaxRate, default_tax_rate_id).percentage) if default_tax_rate_id else Decimal("0")
     )
     today = datetime.now(timezone.utc).date()
-    lines = []
-    subtotal = discount_total = tax_total = Decimal("0")
+    priced = []
     for item in cart_items(session, cart.id):
         product = session.get(catalog.Product, item.product_id)
         if product is None:
             raise NotFoundError("Product")
         unit_price = catalog.resolve_price(session, product, currency=company.base_currency, on_date=today)
         qty = dec(item.qty)
-        tax_amount = money(qty * unit_price * default_tax / Decimal("100"), 2)
-        line_total = money(qty * unit_price + tax_amount, 2)
-        subtotal += qty * unit_price
-        tax_total += tax_amount
-        lines.append(
+        priced.append(
             {
                 "item_id": item.id,
                 "product_id": product.id,
+                "category_id": product.category_id,
                 "sku": product.sku,
-                "qty": str(qty),
-                "unit_price": str(unit_price),
+                "qty": qty,
+                "unit_price": unit_price,
+                "amount": money(qty * unit_price, 2),
+            }
+        )
+
+    coupon = promotions.price(
+        session,
+        company.id,
+        cart.coupon_code,
+        [
+            promotions.QuoteLine(
+                product_id=row["product_id"],
+                category_id=row["category_id"],
+                amount=row["amount"],
+            )
+            for row in priced
+        ],
+        customer_key=customer_key,
+        strict=strict_coupon,
+    )
+
+    lines = []
+    subtotal = discount_total = tax_total = Decimal("0")
+    for row in priced:
+        discount = money(coupon.line_discounts.get(row["product_id"], Decimal("0")))
+        # Tax follows the discounted taxable value, exactly as the invoice does.
+        taxable = row["amount"] - discount
+        tax_amount = money(taxable * default_tax / Decimal("100"), 2)
+        line_total = money(taxable + tax_amount, 2)
+        subtotal += row["amount"]
+        discount_total += discount
+        tax_total += tax_amount
+        lines.append(
+            {
+                "item_id": row["item_id"],
+                "product_id": row["product_id"],
+                "sku": row["sku"],
+                "qty": str(row["qty"]),
+                "unit_price": str(row["unit_price"]),
+                "discount": str(discount),
                 "tax_amount": str(tax_amount),
                 "line_total": str(line_total),
             }
@@ -175,6 +224,7 @@ def quote_cart(session: Session, cart: Cart, *, shipping_total=Decimal("0")) -> 
         "shipping_total": str(shipping),
         "total": str(total),
         "currency": company.base_currency,
+        "coupon": coupon.as_dict() if coupon.code else None,
     }
 
 
@@ -224,7 +274,15 @@ def _checkout_once(
     items = cart_items(session, cart.id)
     if not items:
         raise BusinessRuleError("EMPTY_CART", "Cart is empty")
-    quote = quote_cart(session, cart, shipping_total=shipping_total)
+    # Strict: a code that can no longer be used must fail here, with its reason,
+    # rather than silently dropping off the order the shopper is paying for.
+    quote = quote_cart(
+        session,
+        cart,
+        shipping_total=shipping_total,
+        customer_key=coupon_customer_key(actor_user_id, customer),
+        strict_coupon=True,
+    )
 
     doc_number = allocate_number(session, company_id, "sales_order")
     order = SalesOrder(
@@ -249,6 +307,20 @@ def _checkout_once(
     )
     session.add(order)
     session.flush()
+
+    coupon_quote = quote.get("coupon") or {}
+    coupon = None
+    if coupon_quote.get("valid"):
+        coupon = promotions.get_coupon(session, company_id, coupon_quote["code"])
+        order.coupon_id = coupon.id if coupon else None
+        order.coupon_code = coupon_quote["code"]
+        promotions.redeem(
+            session,
+            coupon=coupon,
+            order_id=order.id,
+            amount=Decimal(coupon_quote["discount_total"]),
+            customer_key=coupon_customer_key(actor_user_id, customer),
+        )
 
     line_number = 1
     for line in quote["lines"]:
@@ -278,7 +350,8 @@ def _checkout_once(
                 description_snapshot=product.name,
                 qty=Decimal(line["qty"]),
                 unit_price=Decimal(line["unit_price"]),
-                discount=Decimal("0"),
+                # the coupon's share of this line, so the invoice reproduces it
+                discount=Decimal(line["discount"]),
                 tax_percentage=default_sales_tax_percentage(session, company_id),
                 line_total=Decimal(line["line_total"]),
                 tax_amount=Decimal(line["tax_amount"]),
@@ -291,6 +364,14 @@ def _checkout_once(
     cart.status = "converted"
     session.flush()
     return order
+
+
+def coupon_customer_key(actor_user_id: str | None, customer) -> str | None:
+    """Who counts as "one customer" for per-customer coupon limits."""
+    if actor_user_id:
+        return actor_user_id
+    email = (getattr(customer, "email", None) or "").strip().lower()
+    return email or None
 
 
 def default_sales_tax_percentage(session: Session, company_id: str) -> Decimal:

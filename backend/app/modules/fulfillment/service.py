@@ -112,6 +112,8 @@ def transition_shipment(
         order = session.get(SalesOrder, shipment.order_id)
         if order is not None:
             order.status = "delivered"
+            # the shopper's return window is measured from here
+            order.delivered_at = shipment.delivered_at
             # Cash on delivery is collected now; prepaid orders already settled.
             sales.collect_cash_on_delivery(session, order=order)
     session.flush()

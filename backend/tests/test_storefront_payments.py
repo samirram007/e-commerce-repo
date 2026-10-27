@@ -87,6 +87,68 @@ def _place(client, ctx, *, method="razorpay", pincode="560001"):
     )
 
 
+class _ProbeAtResponseStart:
+    """ASGI wrapper that runs `probe` as soon as the app starts replying.
+
+    That instant is *before* FastAPI tears the request's dependencies down, so it
+    is exactly where the storefront's follow-up request can land.
+    """
+
+    def __init__(self, app, probe):
+        self.app = app
+        self.probe = probe
+
+    async def __call__(self, scope, receive, send):
+        async def send_with_probe(message):
+            if message["type"] == "http.response.start":
+                self.probe()
+            await send(message)
+
+        await self.app(scope, receive, send_with_probe)
+
+
+def test_checkout_commits_the_order_before_the_response_is_sent(client, admin_headers, razorpay_stub):
+    """Checkout must be durable before its reply leaves the app.
+
+    The shopper's browser asks for the Razorpay order that reads this row the
+    moment it has the reply, and FastAPI runs `get_db`'s commit *after* the
+    response is flushed — so the follow-up request could reach another connection
+    first and fail with "Sales order not found".
+    """
+    from fastapi.testclient import TestClient
+    from sqlalchemy import func, select
+
+    from app.db.session import get_session_factory
+    from app.main import app
+    from app.modules.sales.models import SalesOrder
+
+    def order_count() -> int:
+        with get_session_factory()() as session:
+            return session.scalar(select(func.count()).select_from(SalesOrder)) or 0
+
+    ctx = _setup_store(client, admin_headers)
+    before = order_count()
+    seen: list[int] = []
+
+    with TestClient(_ProbeAtResponseStart(app, lambda: seen.append(order_count()))) as probing:
+        placed = probing.post(
+            "/api/v1/storefront/shop/checkout",
+            headers={**ctx["headers"], "Idempotency-Key": f"k-{uuid.uuid4()}"},
+            json={
+                "name": "Probe Shopper",
+                "email": f"probe-{uuid.uuid4().hex[:8]}@example.com",
+                "address": {"line1": "1 Test Road", "pincode": "560001", "country": "IN"},
+                "payment_method": "razorpay",
+            },
+        )
+
+    assert placed.status_code == 200, placed.text
+    assert seen, "the probe never saw the reply"
+    # Every other connection must already see the new order at that point: that
+    # is what lets the razorpay follow-up find it.
+    assert seen[0] == before + 1
+
+
 @pytest.fixture
 def razorpay_stub(monkeypatch):
     """Configure fake Razorpay keys and stub the Orders API (no network)."""

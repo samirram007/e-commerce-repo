@@ -21,6 +21,7 @@ from app.modules.catalog.models import (
 )
 from app.modules.companies.models import Company
 from app.modules.partners.models import Customer
+from app.modules.payments import gateways as gateway_svc
 from app.modules.sales import service as sales_svc
 from app.modules.sales.models import Cart, SalesOrder
 from app.modules.storefront.models import (
@@ -43,8 +44,9 @@ MOCK_PAYMENT_METHODS = [
 
 COD_METHOD = {"code": "cod", "label": "Cash on delivery", "provider": "cash"}
 
-#: Every method code the checkout may submit.
-PAYMENT_METHOD_CODES = {"card", "upi", "cod", "razorpay"}
+#: Every method code the checkout may submit: the gateway catalog (Razorpay,
+#: Stripe, … configured in the admin panel) plus the sandbox instruments.
+PAYMENT_METHOD_CODES = set(gateway_svc.METHOD_CODES)
 
 #: Absolute-path prefix for the headerless public image route.
 MEDIA_PREFIX = "/api/v1/storefront/shop/media"
@@ -643,6 +645,37 @@ def token_cart(session: Session, company_id: str, token: str) -> Cart:
     )
 
 
+def apply_coupon(session: Session, company_id: str, token: str, code: str) -> dict:
+    """Apply a promo code to the cart, or explain why it cannot be used.
+
+    The cart is re-priced with the code in place (`strict_coupon`) before it is
+    stored, so an invalid code never sticks and the shopper sees the reason.
+    """
+    from app.modules.promotions import service as promotions
+
+    normalized = promotions.normalize_code(code)
+    if not normalized:
+        raise BusinessRuleError("COUPON_CODE_REQUIRED", "Enter a code")
+    cart = token_cart(session, company_id, token)
+    previous = cart.coupon_code
+    cart.coupon_code = normalized
+    try:
+        sales_svc.quote_cart(session, cart, strict_coupon=True)
+    except BusinessRuleError:
+        cart.coupon_code = previous
+        raise
+    session.flush()
+    return guest_cart_out(session, company_id, token)
+
+
+def clear_coupon(session: Session, company_id: str, token: str) -> dict:
+    """Drop the cart's promo code (the quote goes back to full price)."""
+    cart = token_cart(session, company_id, token)
+    cart.coupon_code = None
+    session.flush()
+    return guest_cart_out(session, company_id, token)
+
+
 def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
     """Cart payload for the storefront: product data plus the authoritative
     per-line pricing from `quote_cart` so the UI never computes totals itself."""
@@ -780,6 +813,7 @@ def settings_out(row: StorefrontSettings | None, company_id: str) -> dict:
         return {
             "free_shipping_threshold": None,
             "flat_shipping_fee": None,
+            "return_window_days": 7,
             "contact_phone": None,
             "contact_email": None,
             "contact_address": None,
@@ -793,6 +827,7 @@ def settings_out(row: StorefrontSettings | None, company_id: str) -> dict:
     return {
         "free_shipping_threshold": str(row.free_shipping_threshold) if row.free_shipping_threshold is not None else None,
         "flat_shipping_fee": str(row.flat_shipping_fee) if row.flat_shipping_fee is not None else None,
+        "return_window_days": row.return_window_days,
         "contact_phone": row.contact_phone,
         "contact_email": row.contact_email,
         "contact_address": row.contact_address,
@@ -955,42 +990,193 @@ def register_shopper(
     return {"company_id": company_id, "email": user.email, "full_name": user.full_name}
 
 
-def payment_methods(session: Session, company_id: str, *, pincode: str | None = None) -> list[dict]:
-    """Available payment methods.
+def shipping_options(
+    session: Session, company_id: str, *, pincode: str | None = None, subtotal=None, weight_kg=None
+) -> list[dict]:
+    """Delivery options at checkout: the carriers the admin enabled, priced.
 
-    Razorpay (cards/UPI/netbanking) is offered whenever keys are configured;
-    without keys the storefront keeps its sandbox gateway so local development
-    (and the demo seed) still works. COD depends on the pincode's zone.
+    Each enabled carrier is quoted through its adapter and falls back to the
+    shop's own delivery-zone rules (`app/modules/delivery/rates.py`). With no
+    carrier configured the shop's standard rule price is the only option, so a
+    fresh store still checks out.
+    """
+    from app.modules.delivery import profiles as carriers
+    from app.modules.delivery import rates
+
+    if subtotal is None:
+        subtotal = dec(0)
+    rule_price = compute_shipping(session, company_id, subtotal)
+    configured = carriers.enabled_carriers(session, company_id)
+    if not configured:
+        return [
+            {
+                "code": "standard",
+                "label": "Standard delivery",
+                "price": str(money(rule_price, 2)),
+                "rate_source": rates.SOURCE_RULES,
+                "carrier": None,
+            }
+        ]
+    out: list[dict] = []
+    for carrier in configured:
+        price, source = rates.price_for(
+            session,
+            company_id,
+            carrier,
+            rule_price=rule_price,
+            pincode=pincode,
+            subtotal=subtotal,
+            weight_kg=weight_kg,
+        )
+        out.append(
+            {
+                "code": carrier["code"],
+                "label": carrier["label"],
+                "price": str(money(price, 2)),
+                "rate_source": source,
+                "carrier": carrier["code"],
+            }
+        )
+    return out
+
+
+def _apply_shipping_choice(
+    session: Session, company_id: str, payload: dict, *, pincode: str, subtotal, fallback, weight_kg=None
+) -> tuple:
+    """Validate the carrier the shopper picked and return its price and note.
+
+    The carrier price is recomputed here, so a client cannot choose its own
+    delivery charge; an unknown or disabled carrier is rejected.
+    """
+    from app.modules.delivery import profiles as carriers
+
+    code = (payload.get("shipping_carrier") or "").strip()
+    if not code:
+        return fallback, None
+    option = next(
+        (
+            option
+            for option in shipping_options(
+                session, company_id, pincode=pincode or None, subtotal=subtotal, weight_kg=weight_kg
+            )
+            if option["code"] == code
+        ),
+        None,
+    )
+    if option is None or not carriers.enabled_carriers(session, company_id):
+        raise BusinessRuleError(
+            "SHIPPING_OPTION_UNAVAILABLE", f"Delivery option '{code}' is not available for this order"
+        )
+    return dec(option["price"]), f"Shipping: {option['label']}"
+
+
+def cart_weight_kg(session: Session, cart: Cart) -> Decimal:
+    """Parcel weight of a cart: the sum of each line's product weight × qty.
+
+    Carriers rate by weight, so a cart without weights simply weighs zero and
+    the rate falls back to the shop's rules.
+    """
+    total = dec(0)
+    for line in sales_svc.cart_items(session, cart.id):
+        product = session.get(Product, line.product_id)
+        if product is not None and product.weight_kg:
+            total += dec(product.weight_kg) * dec(line.qty)
+    return money(total, 3)
+
+
+def shipping_options_for_cart(
+    session: Session, *, company_id: str, cart_token: str, pincode: str | None = None
+) -> list[dict]:
+    """Delivery options priced for the shopper's current cart.
+
+    The cart subtotal decides rule-based pricing (free-shipping thresholds) and
+    the cart weight is what a carrier rates, so both are read server-side; an
+    empty or unknown cart just prices at zero.
+    """
+    from app.core.exceptions import AppError
+
+    subtotal, weight_kg = dec(0), dec(0)
+    try:
+        cart = token_cart(session, company_id, cart_token)
+        subtotal = dec(sales_svc.quote_cart(session, cart)["subtotal"])
+        weight_kg = cart_weight_kg(session, cart)
+    except AppError:
+        pass
+    return shipping_options(
+        session, company_id, pincode=pincode, subtotal=subtotal, weight_kg=weight_kg
+    )
+
+
+def payment_methods(session: Session, company_id: str, *, pincode: str | None = None) -> list[dict]:
+    """Available payment methods, in the order the admin arranged them.
+
+    Gateways enabled in the admin panel are offered here (with the label, the
+    instruments and the note the admin configured); COD availability still
+    depends on the delivery zone's pincode. When the company has enabled no
+    online gateway the storefront falls back to its sandbox gateway, so local
+    development and the demo seed keep working.
     """
     from app.core.config import get_settings
 
     zone = None
     if pincode and pincode.strip():
         zone = _resolve_zone(session, company_id, normalize_pincode(pincode))
-    out: list[dict] = []
-    if get_settings().razorpay_configured:
-        out.append(
-            {
-                "code": "razorpay",
-                "label": "Cards / UPI / Netbanking",
-                "provider": "razorpay",
-                "available": True,
-            }
-        )
-    else:
-        out.extend({**method, "available": True} for method in MOCK_PAYMENT_METHODS)
-        # Tells the checkout UI why the Razorpay window never opens: no keys.
-        out.append(
-            {
-                "code": "razorpay",
-                "label": "Cards / UPI / Netbanking",
-                "provider": "razorpay",
-                "available": False,
-                "reason": "not_configured",
-            }
-        )
     cod_available = zone.cod_allowed if zone is not None else True
-    out.append({**COD_METHOD, "available": cod_available})
+    configured = gateway_svc.checkout_gateways(session, company_id)
+    out: list[dict] = []
+    online: list[dict] = []
+    for gateway in configured:
+        entry = {
+            "code": gateway["code"],
+            "label": gateway["label"],
+            "provider": gateway["provider"],
+            "kind": gateway["kind"],
+            "mode": gateway["mode"],
+            "methods": gateway["methods"],
+            "instructions": gateway["instructions"],
+            "available": True,
+        }
+        if gateway["code"] == "cod":
+            entry["provider"] = "cash"
+            entry["available"] = cod_available
+        else:
+            online.append(entry)
+        out.append(entry)
+
+    if not online:
+        # Nothing configured: keep the sandbox so a fresh checkout still works.
+        if get_settings().razorpay_configured:
+            sandbox = [
+                {
+                    "code": "razorpay",
+                    "label": "Cards / UPI / Netbanking",
+                    "provider": "razorpay",
+                    "kind": gateway_svc.KIND_HOSTED_MODAL,
+                    "available": True,
+                }
+            ]
+        else:
+            sandbox = [
+                {**method, "kind": "sandbox", "available": True}
+                for method in MOCK_PAYMENT_METHODS
+            ]
+            # Tells the checkout UI why the Razorpay window never opens: no keys.
+            sandbox.append(
+                {
+                    "code": "razorpay",
+                    "label": "Cards / UPI / Netbanking",
+                    "provider": "razorpay",
+                    "kind": gateway_svc.KIND_HOSTED_MODAL,
+                    "available": False,
+                    "reason": "not_configured",
+                }
+            )
+        # Sandbox methods lead, COD stays last unless the admin placed it.
+        at = next((i for i, method in enumerate(out) if method["code"] == "cod"), len(out))
+        out[at:at] = sandbox
+
+    if not any(method["code"] == "cod" for method in out):
+        out.append({**COD_METHOD, "kind": gateway_svc.KIND_OFFLINE, "available": cod_available})
     return out
 
 
@@ -1123,6 +1309,14 @@ def _format_address(address: dict) -> str:
     return ", ".join(part for part in parts if part)
 
 
+def _return_by(session: Session, order: SalesOrder) -> str | None:
+    """Last day a return may be requested (None when the shop sets no window)."""
+    from app.modules.returns.service import return_cutoff
+
+    cutoff = return_cutoff(session, order.company_id, order)
+    return cutoff.date().isoformat() if cutoff is not None else None
+
+
 def _order_out(session: Session, order: SalesOrder) -> dict:
     from app.modules.payments.models import PaymentRecord
 
@@ -1142,8 +1336,14 @@ def _order_out(session: Session, order: SalesOrder) -> dict:
         "cancel_reason": order.cancel_reason,
         "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else None,
         "order_date": str(order.order_date),
+        # the return window runs from delivery; the shopper page shows the deadline
+        "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
+        "return_by": _return_by(session, order),
+        "can_review": order.payment_state == "paid",
         "currency": order.currency,
         "subtotal": str(order.subtotal),
+        "discount_total": str(order.discount_total),
+        "coupon_code": order.coupon_code,
         "tax_total": str(order.tax_total),
         "shipping_total": str(order.shipping_total),
         "total": str(order.total),
@@ -1215,13 +1415,21 @@ def guest_checkout(
         raise BusinessRuleError("EMAIL_REQUIRED", "An email address is required to place the order")
 
     address_text = _format_address(address)
+    subtotal = sales_svc.quote_cart(session, cart)["subtotal"]
     if get_settings_row(session, company_id) is not None:
         # The store's shipping rules are authoritative; ignore any client value.
-        shipping_total = compute_shipping(
-            session, company_id, sales_svc.quote_cart(session, cart)["subtotal"]
-        )
+        shipping_total = compute_shipping(session, company_id, subtotal)
     else:
         shipping_total = dec(payload.get("shipping_total") or "0")
+    shipping_total, carrier_note = _apply_shipping_choice(
+        session,
+        company_id,
+        payload,
+        pincode=pincode,
+        subtotal=subtotal,
+        fallback=shipping_total,
+        weight_kg=cart_weight_kg(session, cart),
+    )
     order, replayed = sales_svc.checkout_cart(
         session,
         company_id=company_id,
@@ -1231,7 +1439,7 @@ def guest_checkout(
         shipping_address=address_text,
         billing_address=address_text,
         shipping_total=shipping_total,
-        notes=payload.get("notes") or ("Cash on delivery" if method == "cod" else None),
+        notes=payload.get("notes") or carrier_note or ("Cash on delivery" if method == "cod" else None),
         idempotency_key=idempotency_key,
     )
     payment_state = order.payment_state
@@ -1385,6 +1593,16 @@ def _razorpay_intent(session: Session, company_id: str, order_id: str):
     )
 
 
+def _razorpay_credentials(session: Session, company_id: str) -> dict:
+    """Razorpay credentials for the company that owns the order.
+
+    Credentials stored in the admin panel win; a deployment that has not moved
+    them into the panel keeps working off RAZORPAY_* environment variables.
+    """
+    return gateway_svc.credentials_for(session, company_id, "razorpay")
+
+
+
 def create_razorpay_order(
     session: Session, *, company_id: str, cart_token: str, order_id: str
 ) -> dict:
@@ -1400,76 +1618,98 @@ def create_razorpay_order(
     from app.modules.payments import razorpay
     from app.modules.payments.models import PaymentRecord
 
-    settings = get_settings()
-    if not settings.razorpay_configured:
-        raise BusinessRuleError(
-            "RAZORPAY_NOT_CONFIGURED",
-            "Online payments are unavailable: set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET",
-        )
-    order = _owned_order(session, company_id, cart_token, order_id)
-    if order.payment_state == "paid":
-        raise BusinessRuleError("ORDER_ALREADY_PAID", "This order is already paid")
-    if order.status != "pending_payment":
-        raise BusinessRuleError(
-            "ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be paid"
-        )
-
-    intent = _razorpay_intent(session, company_id, order.id)
-    if intent is not None:
-        gateway_order_id = intent.provider_ref.removeprefix("order:")
-    else:
-        company = session.get(Company, company_id)
-        gateway = razorpay.create_order(
-            amount_paise=razorpay.amount_to_paise(order.total),
-            currency=order.currency,
-            receipt=order.doc_number,
-            notes={"order_id": order.id, "company_id": company_id, "doc_number": order.doc_number},
-        )
-        gateway_order_id = gateway["id"]
-        exchange_rate = dec(
-            rate_for(
-                session,
-                company_id=company_id,
-                from_currency=order.currency,
-                base_currency=company.base_currency if company else order.currency,
-                on_date=order.order_date,
+    credentials = _razorpay_credentials(session, company_id)
+    with razorpay.use_credentials(credentials):
+        if not razorpay.is_configured():
+            raise BusinessRuleError(
+                "RAZORPAY_NOT_CONFIGURED",
+                "Online payments are unavailable: enable Razorpay in Setup → Payment gateways "
+                "with its key id and secret, or set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET",
             )
-        )
-        intent = PaymentRecord(
-            company_id=company_id,
-            direction="receipt",
-            method="razorpay",
-            provider="razorpay",
-            provider_ref=f"order:{gateway_order_id}",
-            status="pending",
-            amount=dec(order.total),
-            currency=order.currency,
-            exchange_rate=exchange_rate,
-            amount_base=money(dec(order.total) * exchange_rate, 2),
-            customer_id=order.customer_id,
-            order_id=order.id,
-            occurred_at=datetime.now(timezone.utc),
-            idempotency_scope="razorpay_intent",
-            notes=f"Razorpay order {gateway_order_id}",
-        )
-        session.add(intent)
-        session.flush()
+        order = _owned_order(session, company_id, cart_token, order_id)
+        if order.payment_state == "paid":
+            raise BusinessRuleError("ORDER_ALREADY_PAID", "This order is already paid")
+        if order.status != "pending_payment":
+            raise BusinessRuleError(
+                "ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be paid"
+            )
 
-    company = session.get(Company, company_id)
-    return {
-        "key_id": settings.razorpay_key_id or "rzp_demo_storefront",
-        "demo": razorpay.is_demo(),
-        "razorpay_order_id": gateway_order_id,
-        "amount": razorpay.amount_to_paise(order.total),
-        "currency": order.currency,
-        "order_id": order.id,
-        "doc_number": order.doc_number,
-        "store_name": company.name if company else "Store",
-        "description": f"Order {order.doc_number}",
-    }
+        intent = _razorpay_intent(session, company_id, order.id)
+        if intent is not None:
+            gateway_order_id = intent.provider_ref.removeprefix("order:")
+        else:
+            company = session.get(Company, company_id)
+            gateway = razorpay.create_order(
+                amount_paise=razorpay.amount_to_paise(order.total),
+                currency=order.currency,
+                receipt=order.doc_number,
+                notes={"order_id": order.id, "company_id": company_id, "doc_number": order.doc_number},
+            )
+            gateway_order_id = gateway["id"]
+            exchange_rate = dec(
+                rate_for(
+                    session,
+                    company_id=company_id,
+                    from_currency=order.currency,
+                    base_currency=company.base_currency if company else order.currency,
+                    on_date=order.order_date,
+                )
+            )
+            intent = PaymentRecord(
+                company_id=company_id,
+                direction="receipt",
+                method="razorpay",
+                provider="razorpay",
+                provider_ref=f"order:{gateway_order_id}",
+                status="pending",
+                amount=dec(order.total),
+                currency=order.currency,
+                exchange_rate=exchange_rate,
+                amount_base=money(dec(order.total) * exchange_rate, 2),
+                customer_id=order.customer_id,
+                order_id=order.id,
+                occurred_at=datetime.now(timezone.utc),
+                idempotency_scope="razorpay_intent",
+                notes=f"Razorpay order {gateway_order_id}",
+            )
+            session.add(intent)
+            session.flush()
+
+        company = session.get(Company, company_id)
+        return {
+            "key_id": razorpay.key_id() or "rzp_demo_storefront",
+            "demo": razorpay.is_demo(),
+            "razorpay_order_id": gateway_order_id,
+            "amount": razorpay.amount_to_paise(order.total),
+            "currency": order.currency,
+            "order_id": order.id,
+            "doc_number": order.doc_number,
+            "store_name": company.name if company else "Store",
+            "description": f"Order {order.doc_number}",
+        }
 
 
 def verify_razorpay_payment(
+    session: Session, *, company_id: str, cart_token: str, order_id: str,
+    razorpay_order_id: str, razorpay_payment_id: str, razorpay_signature: str,
+) -> dict:
+    """Verify the Checkout signature with this company's gateway credentials,
+    then mark the order paid + invoice it."""
+    from app.modules.payments import razorpay
+
+    with razorpay.use_credentials(_razorpay_credentials(session, company_id)):
+        return _verify_razorpay_payment(
+            session,
+            company_id=company_id,
+            cart_token=cart_token,
+            order_id=order_id,
+            razorpay_order_id=razorpay_order_id,
+            razorpay_payment_id=razorpay_payment_id,
+            razorpay_signature=razorpay_signature,
+        )
+
+
+def _verify_razorpay_payment(
     session: Session, *, company_id: str, cart_token: str, order_id: str,
     razorpay_order_id: str, razorpay_payment_id: str, razorpay_signature: str,
 ) -> dict:
@@ -1525,6 +1765,43 @@ def verify_razorpay_payment(
 
 
 def handle_razorpay_webhook(session: Session, *, raw_body: bytes, signature: str | None) -> dict:
+    """Verify and apply Razorpay webhooks (capture events) idempotently.
+
+    Webhooks arrive without store headers, so the payload itself names the order
+    (and therefore the company). The company's stored webhook secret verifies
+    the call, falling back to RAZORPAY_WEBHOOK_SECRET.
+    """
+    from app.modules.payments import razorpay
+
+    credentials = {}
+    company_id = _webhook_company_id(raw_body)
+    if company_id:
+        credentials = _razorpay_credentials(session, company_id)
+    with razorpay.use_credentials(credentials):
+        return _handle_razorpay_webhook(session, raw_body=raw_body, signature=signature)
+
+
+def _webhook_company_id(raw_body: bytes) -> str:
+    """Company noted on the webhook payload (empty when the body is unusable)."""
+    import json
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return ""
+    bundles = payload.get("payload") or {}
+    entities = [
+        (bundles.get("order") or {}).get("entity") or {},
+        (bundles.get("payment") or {}).get("entity") or {},
+    ]
+    for entity in entities:
+        company_id = (entity.get("notes") or {}).get("company_id")
+        if company_id:
+            return company_id
+    return ""
+
+
+def _handle_razorpay_webhook(session: Session, *, raw_body: bytes, signature: str | None) -> dict:
     """Verify and apply Razorpay webhooks (capture events) idempotently."""
     import json
 
@@ -1677,3 +1954,153 @@ def guest_request_return(
         notes=notes,
     )
     return _return_out(session, row)
+
+
+# ---- purchase feedback (verified-purchase reviews + order experience) ----
+def submit_product_review(
+    session: Session, *, company_id: str, cart_token: str, order_id: str, product_id: str,
+    rating, title: str | None = None, body: str | None = None, owner: str | None = None,
+) -> dict:
+    """Review an item from an order the shopper owns (pending store approval)."""
+    from app.modules.feedback import service as feedback
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    review = feedback.submit_review(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        product_id=product_id,
+        rating=rating,
+        title=title,
+        body=body,
+        owner_key=owner,
+        customer_id=order.customer_id,
+    )
+    return {**feedback.review_out(review, shopper=True), "summary": feedback.summary(session, company_id, product_id)}
+
+
+def order_feedback_state(session: Session, *, company_id: str, cart_token: str, order_id: str) -> dict:
+    """What the shopper can still review on this order, and what they already did."""
+    from app.modules.feedback import service as feedback
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    row = feedback.order_feedback(session, company_id, order.id)
+    return {
+        "order_id": order.id,
+        "can_review": order.payment_state == "paid",
+        "items": feedback.reviewable_lines(session, order),
+        "reviews": [feedback.review_out(r, shopper=True) for r in feedback.order_reviews(session, company_id, order.id)],
+        "order_feedback": feedback.feedback_out(row) if row is not None else None,
+    }
+
+
+def submit_order_experience(
+    session: Session, *, company_id: str, cart_token: str, order_id: str,
+    delivery_rating=None, packaging_rating=None, service_rating=None, comment: str | None = None,
+    owner: str | None = None,
+) -> dict:
+    """Delivery / packaging / service feedback for one of the shopper's orders."""
+    from app.modules.feedback import service as feedback
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    row = feedback.submit_order_feedback(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        delivery_rating=delivery_rating,
+        packaging_rating=packaging_rating,
+        service_rating=service_rating,
+        comment=comment,
+        owner_key=owner,
+        customer_id=order.customer_id,
+    )
+    return feedback.feedback_out(row)
+
+
+def product_reviews(session: Session, company_id: str, product_id: str) -> dict:
+    """Published reviews for a product (approved only) with the rating summary."""
+    from app.modules.feedback import service as feedback
+
+    return {
+        "summary": feedback.summary(session, company_id, product_id),
+        "items": [
+            feedback.review_out(row, shopper=True)
+            for row in feedback.product_reviews(session, company_id, product_id)
+        ],
+    }
+
+
+# ---- shopper file uploads (colour proof, prescription, return photo...) ----
+def _shopper_file_out(record) -> dict:
+    return {
+        "id": record.id,
+        "name": record.original_name,
+        "content_type": record.content_type,
+        "size_bytes": record.size_bytes,
+        "order_id": record.order_id,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+
+def shopper_uploads_enabled(session: Session, company_id: str) -> bool:
+    """Whether the store's moderated inbox accepts customer uploads.
+
+    The store opts in by enabling uploads on the "Customer uploads" folder in
+    the ERP file library, so there is a single switch for the feature.
+    """
+    from app.modules.files.models import FileFolder
+
+    row = session.scalar(
+        select(FileFolder).where(
+            FileFolder.company_id == company_id,
+            FileFolder.system_key == "shopper_uploads",
+            FileFolder.deleted_at.is_(None),
+        )
+    )
+    return bool(row is not None and row.accepts_shopper_uploads)
+
+
+def upload_shopper_file(
+    session: Session, *, company_id: str, user_id: str | None, anon_id: str | None,
+    file, order_id: str | None = None,
+) -> dict:
+    """Attach a document or photo from the storefront to the customer's inbox."""
+    from app.modules.files import service as files_service
+
+    owner = owner_key(user_id, anon_id)
+    if order_id:
+        order = session.get(SalesOrder, order_id)
+        if order is None or order.company_id != company_id:
+            raise NotFoundError("Order")
+    record = files_service.shopper_upload(
+        session,
+        company_id=company_id,
+        owner=owner,
+        upload_file=file,
+        order_id=order_id,
+    )
+    return _shopper_file_out(record)
+
+
+def shopper_upload_list(
+    session: Session, *, company_id: str, user_id: str | None, anon_id: str | None
+) -> list[dict]:
+    """The files this shopper attached, newest first."""
+    from app.modules.files import service as files_service
+
+    owner = owner_key(user_id, anon_id)
+    return [_shopper_file_out(row) for row in files_service.shopper_files(session, company_id, owner)]
+
+
+def shopper_file_contents(
+    session: Session, *, company_id: str, user_id: str | None, anon_id: str | None, file_id: str
+):
+    """Bytes of one of the shopper's own uploads; anybody else's is a 404."""
+    from app.modules.files import service as files_service
+
+    owner = owner_key(user_id, anon_id)
+    record = files_service.get_file(session, company_id, file_id)
+    if record.owner_key != owner:
+        raise NotFoundError("File")
+    path, _name, content_type = files_service.bytes_of(session, record)
+    return record, path, content_type

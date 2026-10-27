@@ -9,8 +9,11 @@ import {
   fetchOrders,
   fetchPaymentMethods,
   fetchPincode,
+  fetchOrderFeedbackState,
   fetchProduct,
+  fetchProductReviews,
   fetchProducts,
+  fetchShippingOptions,
   fetchTrending,
   type ProductFilters,
 } from "./api";
@@ -28,6 +31,9 @@ export const shopKeys = {
   orderReturns: (orderId: string) => ["shop", "order-returns", orderId] as const,
   pincode: (pincode: string) => ["shop", "pincode", pincode] as const,
   paymentMethods: (pincode?: string) => ["shop", "payment-methods", pincode ?? ""] as const,
+  shippingOptions: (pincode?: string) => ["shop", "shipping-options", pincode ?? ""] as const,
+  productReviews: (productId: string) => ["shop", "product-reviews", productId] as const,
+  orderFeedback: (orderId: string) => ["shop", "order-feedback", orderId] as const,
 };
 
 export function categoriesQueryOptions() {
@@ -92,5 +98,31 @@ export function paymentMethodsQueryOptions(pincode?: string) {
     queryKey: shopKeys.paymentMethods(pincode),
     queryFn: () => fetchPaymentMethods(pincode),
     staleTime: 60_000,
+  });
+}
+
+export function shippingOptionsQueryOptions(pincode?: string) {
+  return queryOptions({
+    queryKey: shopKeys.shippingOptions(pincode),
+    queryFn: () => fetchShippingOptions(pincode),
+    staleTime: 60_000,
+  });
+}
+
+/** Approved reviews shown on a product page. */
+export function productReviewsQueryOptions(productId: string) {
+  return queryOptions({
+    queryKey: shopKeys.productReviews(productId),
+    queryFn: () => fetchProductReviews(productId),
+    staleTime: 60_000,
+  });
+}
+
+/** Reviewable items + existing feedback for one of the shopper's orders. */
+export function orderFeedbackQueryOptions(orderId: string) {
+  return queryOptions({
+    queryKey: shopKeys.orderFeedback(orderId),
+    queryFn: () => fetchOrderFeedbackState(orderId),
+    enabled: Boolean(orderId),
   });
 }

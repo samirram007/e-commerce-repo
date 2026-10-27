@@ -24,6 +24,9 @@ export const orderSchema = z.object({
   order_date: z.string(),
   currency: z.string(),
   subtotal: decimalString,
+  /** Discounts on the order: coupon or manual, already allocated to the lines. */
+  discount_total: decimalString.optional(),
+  coupon_code: z.string().nullable().optional(),
   tax_total: decimalString,
   shipping_total: decimalString,
   total: decimalString,
@@ -36,8 +39,12 @@ export const orderLineSchema = z.object({
   id: z.string(),
   product_id: z.string(),
   sku: z.string(),
+  description: z.string().nullable().optional(),
   qty: decimalString,
   unit_price: decimalString,
+  /** Discount applied to this line (manual entry or an allocated coupon). */
+  discount: decimalString.optional(),
+  tax_percentage: decimalString.optional(),
   line_total: decimalString,
   tax_amount: decimalString,
 });

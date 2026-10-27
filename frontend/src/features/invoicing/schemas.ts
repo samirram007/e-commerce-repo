@@ -129,6 +129,8 @@ export const invoiceFormSchema = z.object({
   customer_address: z.string().trim().max(500).optional(),
   currency: z.string().trim().length(3, "3-letter currency code"),
   shipping_total: decimalInput,
+  /** Order-level manual discount, spread across the lines by value. */
+  discount: decimalInput,
   due_date: z
     .string()
     .optional()
