@@ -436,3 +436,35 @@ def guest_pay_order(
         order_id=order_id,
         method=payload.method,
     )
+
+
+class ConfirmPaymentIn(BaseModel):
+    """Provider-specific callback payload — verified server-side, never trusted."""
+
+    # Razorpay checkout handler
+    razorpay_order_id: str | None = None
+    razorpay_payment_id: str | None = None
+    razorpay_signature: str | None = None
+    # Stripe PaymentElement
+    payment_intent_id: str | None = None
+    # mock gateway (dev/tests)
+    payment_id: str | None = None
+
+
+@router.post("/orders/{order_id}/payment/confirm")
+def confirm_payment(
+    order_id: str,
+    payload: ConfirmPaymentIn,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Confirm a payment the browser completed: verifies the provider's
+    callback (HMAC signature / PaymentIntent status) and completes the order."""
+    return svc.confirm_payment(
+        session,
+        company_id=ctx.company_id,
+        cart_token=token,
+        order_id=order_id,
+        payload={k: v for k, v in payload.model_dump().items() if v is not None},
+    )

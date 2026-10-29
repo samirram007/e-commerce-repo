@@ -193,3 +193,62 @@ export const fiscalYearFormSchema = z
   });
 export type FiscalYearFormInput = z.input<typeof fiscalYearFormSchema>;
 export type FiscalYearPayload = z.output<typeof fiscalYearFormSchema>;
+
+/* ---- payment gateways ---- */
+export const GATEWAY_PROVIDERS = ["razorpay", "stripe", "mock"] as const;
+export type GatewayProvider = (typeof GATEWAY_PROVIDERS)[number];
+export const GATEWAY_MODES = ["test", "live"] as const;
+export type GatewayMode = (typeof GATEWAY_MODES)[number];
+export const GATEWAY_METHODS = ["card", "upi"] as const;
+
+/** One mode's key set — secrets are write-only (flags + last-4 hint only). */
+export const modeKeysSchema = z.object({
+  public_key: z.string().nullable(),
+  has_secret: z.boolean(),
+  secret_hint: z.string().nullable(),
+  has_webhook_secret: z.boolean(),
+  webhook_secret_hint: z.string().nullable(),
+});
+export type ModeKeys = z.infer<typeof modeKeysSchema>;
+
+export const gatewaySchema = z.object({
+  provider: z.string(),
+  display_name: z.string(),
+  is_enabled: z.boolean(),
+  mode: z.enum(GATEWAY_MODES),
+  supported_methods: z.array(z.string()),
+  priority: z.number(),
+  configured: z.boolean(),
+  test: modeKeysSchema,
+  live: modeKeysSchema,
+  webhook_url: z.string(),
+  updated_at: z.string().nullable(),
+});
+export type Gateway = z.infer<typeof gatewaySchema>;
+export const gatewayListSchema = z.array(gatewaySchema);
+
+/**
+ * PUT payload. Secrets are omitted (keep), empty string (keep) or null
+ * (clear); only an explicit replacement value is stored.
+ */
+export const gatewayUpdateSchema = z.object({
+  is_enabled: z.boolean(),
+  display_name: z.string().max(80).nullable(),
+  mode: z.enum(GATEWAY_MODES),
+  supported_methods: z.array(z.string()),
+  priority: z.number().min(0).max(1000),
+  test_public_key: z.string().nullable().optional(),
+  test_secret: z.string().nullable().optional(),
+  test_webhook_secret: z.string().nullable().optional(),
+  live_public_key: z.string().nullable().optional(),
+  live_secret: z.string().nullable().optional(),
+  live_webhook_secret: z.string().nullable().optional(),
+});
+export type GatewayUpdatePayload = z.output<typeof gatewayUpdateSchema>;
+
+export const gatewayTestResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string(),
+  mode: z.string(),
+});
+export type GatewayTestResult = z.infer<typeof gatewayTestResultSchema>;

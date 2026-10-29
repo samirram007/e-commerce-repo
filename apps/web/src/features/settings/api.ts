@@ -13,6 +13,9 @@ import {
   storageLocationSchema,
   taxRateListSchema,
   taxRateSchema,
+  gatewayListSchema,
+  gatewaySchema,
+  gatewayTestResultSchema,
   type Company,
   type CompanyCreatePayload,
   type CompanyUpdatePayload,
@@ -27,6 +30,9 @@ import {
   type StorageLocationPayload,
   type TaxRate,
   type TaxRatePayload,
+  type Gateway,
+  type GatewayUpdatePayload,
+  type GatewayTestResult,
 } from "./schemas";
 
 /* ---- company ---- */
@@ -108,6 +114,34 @@ export async function forwardFiscalYear(fiscalYearId: string): Promise<ForwardFi
   return forwardFiscalYearResultSchema.parse(data);
 }
 
+/* ---- payment gateways ---- */
+export async function fetchGateways(): Promise<Gateway[]> {
+  const { data } = await api.get("/payments/gateways");
+  return gatewayListSchema.parse(data);
+}
+
+export async function updateGateway(
+  provider: string,
+  input: GatewayUpdatePayload,
+): Promise<Gateway> {
+  const { data } = await api.put(`/payments/gateways/${provider}`, input);
+  return gatewaySchema.parse(data);
+}
+
+export async function switchGatewayMode(
+  provider: string,
+  mode: "test" | "live",
+): Promise<Gateway> {
+  const { data } = await api.post(`/payments/gateways/${provider}/mode`, { mode });
+  return gatewaySchema.parse(data);
+}
+
+export async function testGateway(provider: string): Promise<GatewayTestResult> {
+  const { data } = await api.post(`/payments/gateways/${provider}/test`);
+  return gatewayTestResultSchema.parse(data);
+}
+
+/* ---- fiscal years ---- */
 export async function postOpeningBalances(
   fiscalYearId: string,
   input: OpeningBalancesPayload,

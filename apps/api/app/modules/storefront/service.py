@@ -20,6 +20,7 @@ from app.modules.catalog.models import (
 from app.modules.companies.models import Company
 from app.modules.partners.models import Customer
 from app.modules.sales import service as sales_svc
+from app.modules.payments.models import PaymentRecord
 from app.modules.sales.models import Cart, SalesOrder
 from app.modules.storefront.models import (
     StorefrontAddress,
@@ -683,7 +684,16 @@ def store_info(session: Session, slug: str) -> dict:
 
 
 def payment_methods(session: Session, company_id: str, *, pincode: str | None = None) -> list[dict]:
-    """Available payment methods; COD depends on the pincode's delivery zone."""
+    """Available payment methods; COD depends on the pincode's delivery zone.
+
+    For online methods the gateway resolved *right now* is reported as
+    `provider` + `mode` (so checkout can show a TEST badge and open the right
+    widget). When no gateway can serve the method the row is marked
+    `available=false`. Secrets are never included.
+    """
+    from app.core.exceptions import AppError
+    from app.modules.payments.gateways import resolve_gateway
+
     zone = None
     if pincode:
         zone = session.scalar(
@@ -693,10 +703,24 @@ def payment_methods(session: Session, company_id: str, *, pincode: str | None = 
         )
     out = []
     for method in PAYMENT_METHODS:
-        available = True
-        if method["code"] == "cod" and zone is not None:
-            available = zone.cod_allowed
-        out.append({**method, "available": available})
+        if method["code"] == "cod":
+            # Cash on delivery stays offline — no gateway involved.
+            available = zone.cod_allowed if zone is not None else True
+            out.append({**method, "provider": "cash", "mode": None, "available": available})
+            continue
+        try:
+            adapter, creds, _config = resolve_gateway(session, company_id, method["code"])
+        except AppError:
+            out.append({**method, "mode": None, "available": False})
+            continue
+        out.append(
+            {
+                **method,
+                "provider": adapter.name,
+                "mode": creds.mode if creds else None,
+                "available": True,
+            }
+        )
     return out
 
 
@@ -923,21 +947,20 @@ def guest_checkout(
         idempotency_key=idempotency_key,
     )
     payment_state = order.payment_state
+    payment_out = None
     if method != "cod" and order.status == "pending_payment":
-        order, _payment = sales_svc.pay_order(
-            session,
-            company_id=company_id,
-            actor_user_id=None,
-            order_id=order.id,
-            method=method,
-            provider_name="mock",
-            idempotency_key=f"pay:{order.id}",
+        # Online methods no longer charge synchronously: create the provider
+        # intent and hand the browser everything it needs; the order is only
+        # marked paid after verify_client_payment or a webhook confirms it.
+        payment_out = _start_payment(
+            session, company_id=company_id, actor_user_id=None, order=order, method=method
         )
         payment_state = order.payment_state
     return {
         **_order_out(session, order),
         "payment_method": method,
         "payment_state": payment_state,
+        "payment": payment_out,
         "email": customer.email,
         "replayed": replayed,
     }
@@ -961,22 +984,117 @@ def guest_orders(session: Session, company_id: str, cart_token: str) -> list[dic
 def guest_pay_order(
     session: Session, *, company_id: str, cart_token: str, order_id: str, method: str
 ) -> dict:
-    """Pay a pending order later (continue purchase of an unpaid order)."""
+    """Start (or restart) payment for a pending order — continue purchase."""
     order = session.get(SalesOrder, order_id)
     if order is None or order.company_id != company_id:
         raise NotFoundError("Sales order")
     cart = session.get(Cart, order.cart_id) if order.cart_id else None
     if cart is None or cart.token != cart_token:
         raise BusinessRuleError("ORDER_NOT_OWNED", "This order belongs to another cart")
+    if order.status != "pending_payment":
+        raise BusinessRuleError(
+            "ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be paid"
+        )
     if method not in {m["code"] for m in PAYMENT_METHODS} or method == "cod":
         raise BusinessRuleError("BAD_PAYMENT_METHOD", "Choose an online payment method")
-    order, _payment = sales_svc.pay_order(
+    payment = _start_payment(
+        session, company_id=company_id, actor_user_id=None, order=order, method=method
+    )
+    return {**_order_out(session, order), "payment_method": method, "payment": payment}
+
+
+def _start_payment(
+    session: Session, *, company_id: str, actor_user_id: str | None, order: SalesOrder, method: str
+) -> dict:
+    """Create the provider intent for an order and persist the pending receipt."""
+    from app.modules.payments import service as payments_svc
+    from app.modules.payments.gateways import resolve_gateway
+
+    adapter, creds, _config = resolve_gateway(session, company_id, method)
+    record, intent = payments_svc.create_provider_intent(
+        session,
+        company_id=company_id,
+        actor_user_id=actor_user_id,
+        customer_id=order.customer_id,
+        order_id=order.id,
+        receipt=order.doc_number,
+        amount=order.total,
+        currency=order.currency,
+        method=method,
+        adapter=adapter,
+        creds=creds,
+        idempotency_key=f"intent:{order.id}",
+    )
+    return {
+        "provider": adapter.name,
+        "mode": creds.mode,
+        "payment_id": record.id,
+        "client_payload": intent.client_payload,
+    }
+
+
+def confirm_payment(
+    session: Session, *, company_id: str, cart_token: str, order_id: str, payload: dict
+) -> dict:
+    """Shopper's browser reports the completed payment; verify it with the
+    provider, then complete the order through the shared idempotent path
+    (invoice + journal posted exactly once, no matter whether the webhook or
+    this callback arrives first)."""
+    from app.modules.payments import service as payments_svc
+    from app.modules.payments.gateways import get_gateway_by_name
+
+    order = session.get(SalesOrder, order_id)
+    if order is None or order.company_id != company_id:
+        raise NotFoundError("Sales order")
+    cart = session.get(Cart, order.cart_id) if order.cart_id else None
+    if cart is None or cart.token != cart_token:
+        raise BusinessRuleError("ORDER_NOT_OWNED", "This order belongs to another cart")
+
+    record = payments_svc.pending_for_order(session, order.id)
+    if record is None:
+        settled = session.scalar(
+            select(PaymentRecord).where(
+                PaymentRecord.order_id == order.id,
+                PaymentRecord.direction == "receipt",
+                PaymentRecord.status == "succeeded",
+            ).order_by(PaymentRecord.occurred_at.desc())
+        )
+        if settled is not None and order.status == "paid":
+            # Webhook already finalized this order — replay the happy path.
+            return {
+                **_order_out(session, order),
+                "payment_state": order.payment_state,
+                "payment": {
+                    "provider": settled.provider,
+                    "mode": settled.mode,
+                    "status": settled.status,
+                },
+            }
+        raise BusinessRuleError("NO_PENDING_PAYMENT", "There is no pending payment for this order")
+
+    adapter, creds, _config = get_gateway_by_name(
+        session, company_id, record.provider, mode=record.mode
+    )
+    verify = adapter.verify_client_payment(creds, payload=payload)
+    if not verify.succeeded:
+        raise BusinessRuleError(
+            "PAYMENT_VERIFICATION_FAILED",
+            verify.message or "The payment could not be verified with the provider",
+        )
+    order, record = sales_svc.confirm_order_payment(
         session,
         company_id=company_id,
         actor_user_id=None,
         order_id=order.id,
-        method=method,
-        provider_name="mock",
-        idempotency_key=f"pay:{order.id}",
+        payment=record,
+        charge_ref=verify.provider_ref,
     )
-    return {**_order_out(session, order), "payment_method": method}
+    return {
+        **_order_out(session, order),
+        "payment_state": order.payment_state,
+        "payment": {
+            "provider": record.provider,
+            "mode": record.mode,
+            "status": record.status,
+        },
+    }

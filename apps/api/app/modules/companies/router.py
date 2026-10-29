@@ -78,7 +78,7 @@ def update_company(
     company = svc.update_company(session, company, payload.model_dump(exclude_unset=True))
     log_action(
         session, action="company.updated", entity_type="company", entity_id=company.id,
-        actor_user_id=ctx.user.id, before_data=str(before), after_data=str(payload.model_dump(exclude_unset=True)),
+        actor_user_id=ctx.user.id, before_data=before, after_data=payload.model_dump(exclude_unset=True),
     )
     return CompanyOut.model_validate(company)
 

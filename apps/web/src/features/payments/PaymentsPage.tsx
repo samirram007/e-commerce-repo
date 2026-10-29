@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Badge,
   Button,
   Card,
   DataTable,
@@ -140,6 +141,17 @@ export function PaymentsPage() {
 
   const columns: Column<Payment>[] = [
     { key: "ref", header: "Reference", render: (p) => <strong>{p.provider_ref ?? "—"}</strong> },
+    { key: "provider", header: "Provider", render: (p) => titleCase(p.provider) },
+    {
+      key: "mode",
+      header: "Mode",
+      render: (p) =>
+        p.mode ? (
+          <Badge tone={p.mode === "live" ? "bad" : "warn"}>{p.mode.toUpperCase()}</Badge>
+        ) : (
+          "—"
+        ),
+    },
     { key: "direction", header: "Direction", render: (p) => <StatusBadge status={p.direction} /> },
     { key: "method", header: "Method", render: (p) => titleCase(p.method) },
     { key: "status", header: "Status", render: (p) => <StatusBadge status={p.status} /> },
@@ -313,6 +325,20 @@ export function PaymentsPage() {
               <div>
                 <div className="muted">Method</div>
                 <div>{titleCase(detail.method)}</div>
+              </div>
+              <div>
+                <div className="muted">Provider / mode</div>
+                <div>
+                  {titleCase(detail.provider)}
+                  {detail.mode ? (
+                    <>
+                      {" "}
+                      <Badge tone={detail.mode === "live" ? "bad" : "warn"}>
+                        {detail.mode.toUpperCase()}
+                      </Badge>
+                    </>
+                  ) : null}
+                </div>
               </div>
               <div>
                 <div className="muted">Amount</div>

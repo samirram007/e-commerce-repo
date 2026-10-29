@@ -57,14 +57,16 @@ Frontend (run from `apps/web/`, or from root with `pnpm --filter erp-frontend <s
   errors `src/routes/_admin.tsx(4,38): TS2345 "…/_admin" not assignable to keyof FileRoutesByPath`.
   Fix the route conflict, then let vite regenerate `routeTree.gen.ts`.
 - `pnpm test` passes (**verified** through turbo): `vitest run` → 8 tests in
-  `src/hooks/use-list-state.test.ts`; `uv run pytest` → 94 tests.
-- Backend tests pass (94 tests). `tests/conftest.py` builds the schema with
+  `src/hooks/use-list-state.test.ts`; `uv run pytest` → 114 tests.
+- Backend tests pass (114 tests, incl. `tests/test_payment_gateways.py`). `tests/conftest.py` builds the schema with
   `Base.metadata.create_all`, **not** Alembic, and overrides env vars before app import.
-- There are **10** Alembic revisions in `apps/api/migrations/versions/` (head:
-  `a7c3e91f5d20_storefront_content_and_public_media.py`); `649d352f339d` added `blamable`
+- There are **11** Alembic revisions in `apps/api/migrations/versions/` (head:
+  `b3f7d21a9c04_payment_gateway_configs.py`); `649d352f339d` added `blamable`
   to 25 tables.
 - `psycopg[binary]` is a dependency on **all platforms now** (the old
   `platform_system != 'Windows'` marker was removed), so Windows dev can target Postgres.
+  `httpx` moved into the **main** dependencies (payment gateway adapters call
+  Razorpay/Stripe REST APIs); `cryptography` was added for Fernet secret encryption.
   With no `DATABASE_URL`, the code default is still `sqlite:///./erp_dev.db`.
 - `apps/api/.env` may point at a **local PostgreSQL** (this machine runs the
   `postgresql-x64-18` Windows service, not docker-compose). If the password contains
@@ -96,6 +98,42 @@ Frontend (run from `apps/web/`, or from root with `pnpm --filter erp-frontend <s
 - Raise `AppError` subclasses (`app/core/exceptions.py`), not `HTTPException`; responses use
   the envelope `{"error": {"code", "message", "details"}}`.
 - Health checks: `/health`, `/health/db`.
+
+### Payment gateways (configurable, per company)
+
+- **Config lives in** `payment_gateway_configs` (`PaymentGatewayConfig` in
+  `modules/payments/models.py`): one row per `(company_id, provider)` for
+  `razorpay` | `stripe` | `mock`, with separate **test** and **live** key sets
+  (public key plaintext; secret + webhook secret Fernet-encrypted), an active
+  `mode` (`test`|`live`), `supported_methods` (`card`/`upi`) and `priority`
+  (lowest wins; mock defaults to 100 so real gateways win ties). Admin API:
+  `/api/v1/payments/gateways[...]` (`modules/payments/gateway_router.py`,
+  guarded by `payments.manage`); UI: Settings → **Payment gateways** tab.
+  Secrets are write-only: responses only expose `has_*` flags + last-4 hints;
+  omitting/emptying a secret keeps the stored value, an explicit `null` clears it.
+- **Resolution** happens per request in `modules/payments/gateways.py`
+  (`resolve_gateway` by storefront method, `get_gateway_by_name` for
+  webhooks/refunds). No config + `APP_ENV != prod` falls back to the offline
+  `mock` gateway; in prod a missing gateway raises `NO_PAYMENT_GATEWAY`.
+  Refunds always use the **mode stored on the original `PaymentRecord.mode`**.
+- **Env vars**: `PAYMENT_ENCRYPTION_KEY` (Fernet key for secrets at rest; dev
+  derives a warned fallback from `SECRET_KEY`, prod refuses to boot without it)
+  and `PUBLIC_API_BASE_URL` (public API origin used to build webhook URLs).
+- **Webhook URL format** (paste into the Razorpay/Stripe dashboard):
+  `{PUBLIC_API_BASE_URL}/api/v1/payments/webhooks/{provider}/{company_id}` —
+  public, no auth; the provider's HMAC signature over the raw body is the only
+  gate (`modules/payments/webhooks.py`), applied idempotently by event id.
+  Checkout is redirect/SDK style: `guest_checkout`/`guest_pay_order` create a
+  provider intent + pending `PaymentRecord` and return `payment.client_payload`;
+  the browser confirms via `POST /storefront/shop/orders/{id}/payment/confirm`,
+  and both paths finalize through the same `pay:{order_id}` idempotency key.
+- **Adding a third provider**: implement `PaymentProviderAdapter` in
+  `modules/payments/adapters.py` (`create_intent`, `verify_client_payment`,
+  `parse_webhook`, `refund`, `test_connection`), register the instance in
+  `ADAPTERS`, add its name to `GATEWAY_PROVIDERS` (and, if keys are prefixed,
+  to `_KEY_RULES`), then extend the `_DISPLAY_NAMES`/default-methods maps in
+  `gateway_router.py` and the provider list in
+  `apps/web/src/features/settings/schemas.ts`.
 
 ## Frontend architecture
 

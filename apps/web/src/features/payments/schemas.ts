@@ -19,6 +19,8 @@ export const paymentSchema = z.object({
   direction: z.string(),
   provider: z.string(),
   provider_ref: z.string().nullable(),
+  /** "test" | "live" credential mode of the charge; null for offline/manual. */
+  mode: z.string().nullable().optional(),
   method: z.string(),
   status: z.string(),
   amount: decimalString,

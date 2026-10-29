@@ -91,7 +91,18 @@ export interface PaymentMethod {
   code: string;
   label: string;
   provider: string;
+  /** Active credential mode of the resolved gateway ("test" | "live"); null for offline methods. */
+  mode?: string | null;
   available: boolean;
+}
+
+/** What the browser needs to complete a payment with the active gateway. */
+export interface ShopPayment {
+  provider: string;
+  mode: string | null;
+  payment_id?: string;
+  client_payload?: Record<string, unknown>;
+  status?: string;
 }
 
 export interface ShopAddress {
@@ -133,6 +144,7 @@ export interface ShopOrder {
   shipping_address: string | null;
   items: ShopOrderItem[];
   payment_method?: string;
+  payment?: ShopPayment | null;
   email?: string;
   replayed?: boolean;
 }

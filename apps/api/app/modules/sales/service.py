@@ -308,18 +308,19 @@ def pay_order(
     session: Session, *, company_id: str, actor_user_id: str | None, order_id: str,
     method: str = "mock_gateway", provider_name: str = "mock", idempotency_key: str,
 ) -> tuple[SalesOrder, PaymentRecord]:
-    """Idempotent payment confirm: charges the provider and (on success) marks
-    the order paid and issues + posts the invoice (revenue recognized)."""
+    """Synchronous charge + confirm (authenticated /pay route).
+
+    Creates the provider intent, verifies it immediately (the mock gateway
+    always verifies; hosted gateways are confirmed through
+    `confirm_order_payment` from the client callback or webhook), then
+    finalizes the order — status paid, invoice issued and posted — exactly like
+    the webhook path does. Idempotent by `idempotency_key`.
+    """
 
     def _execute() -> dict:
-        order = _pay_once(
+        order, payment = _charge_once(
             session, company_id=company_id, actor_user_id=actor_user_id, order_id=order_id,
             method=method, provider_name=provider_name,
-        )
-        payment = session.scalar(
-            select(PaymentRecord).where(
-                PaymentRecord.order_id == order.id, PaymentRecord.direction == "receipt", PaymentRecord.status == "succeeded"
-            ).order_by(PaymentRecord.occurred_at.desc())
         )
         return {"order_id": order.id, "payment_id": payment.id if payment else None}
 
@@ -334,33 +335,104 @@ def pay_order(
     return order, session.get(PaymentRecord, result["payment_id"]) if result.get("payment_id") else None
 
 
-def _pay_once(
+def confirm_order_payment(
     session: Session, *, company_id: str, actor_user_id: str | None, order_id: str,
-    method: str, provider_name: str,
+    payment: PaymentRecord, charge_ref: str | None = None,
+) -> tuple[SalesOrder, PaymentRecord]:
+    """Finalize a payment the provider already confirmed (browser callback or
+    webhook). Whichever arrives first completes the order; the other replays
+    through the shared `pay:{order_id}` idempotency key — one payment row, one
+    invoice, one journal.
+    """
+    payments.mark_succeeded(session, payment, charge_ref)
+
+    def _execute() -> dict:
+        order = _finalize_paid_order(session, company_id=company_id, order_id=order_id, actor_user_id=actor_user_id)
+        return {"order_id": order.id, "payment_id": payment.id}
+
+    result, _replayed = run_idempotent(
+        session,
+        scope=f"pay:{company_id}",
+        key=f"pay:{order_id}",
+        company_id=company_id,
+        execute=_execute,
+    )
+    order = session.get(SalesOrder, result["order_id"])
+    stored = session.get(PaymentRecord, result["payment_id"]) if result.get("payment_id") else payment
+    return order, stored
+
+
+def fail_order_payment(session: Session, payment: PaymentRecord, message: str | None = None) -> None:
+    """Provider reported a failed payment: keep the order pending so the shopper
+    can retry through the existing continue-purchase path."""
+    payments.mark_failed(session, payment, message)
+
+
+def _finalize_paid_order(
+    session: Session, *, company_id: str, order_id: str, actor_user_id: str | None
 ) -> SalesOrder:
-    company = _company(session, company_id)
     order = session.get(SalesOrder, order_id)
     if order is None or order.company_id != company_id:
         raise NotFoundError("Sales order")
+    if order.status == "paid":
+        return order
     if order.status != "pending_payment":
         raise BusinessRuleError("ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be paid")
-    payment = payments.provider_charge(
-        session,
-        company_id=company_id,
-        actor_user_id=actor_user_id,
-        customer_id=order.customer_id,
-        order_id=order.id,
-        amount=order.total,
-        currency=order.currency,
-        method=method,
-        provider=provider_name,
-        idempotency_key=f"pay:{order.id}",
-    )
     order.payment_state = "paid"
     order.status = "paid"
     session.flush()
     _issue_invoice_for_paid_order(session, order, actor_user_id)
     return order
+
+
+def _charge_once(
+    session: Session, *, company_id: str, actor_user_id: str | None, order_id: str,
+    method: str, provider_name: str,
+) -> tuple[SalesOrder, PaymentRecord]:
+    """Charge + confirm in one request (offline/mock-capable path)."""
+    order = session.get(SalesOrder, order_id)
+    if order is None or order.company_id != company_id:
+        raise NotFoundError("Sales order")
+    if order.status != "pending_payment":
+        raise BusinessRuleError("ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be paid")
+
+    from app.modules.payments.gateways import resolve_gateway
+
+    adapter, creds, _config = resolve_gateway(session, company_id, method)
+    record = payments.pending_for_order(session, order.id, adapter.name)
+    if record is None:
+        record, _intent = payments.create_provider_intent(
+            session,
+            company_id=company_id,
+            actor_user_id=actor_user_id,
+            customer_id=order.customer_id,
+            order_id=order.id,
+            receipt=order.doc_number,
+            amount=order.total,
+            currency=order.currency,
+            method=method,
+            adapter=adapter,
+            creds=creds,
+            idempotency_key=f"intent:{order.id}",
+        )
+    verify = adapter.verify_client_payment(
+        creds,
+        payload={
+            "order_id": record.provider_ref,
+            "payment_intent_id": record.provider_ref,
+            "razorpay_order_id": record.provider_ref,
+        },
+    )
+    if not verify.succeeded:
+        payments.mark_failed(session, record, verify.message)
+        raise BusinessRuleError(
+            "PAYMENT_DECLINED", f"{verify.error_code}: {verify.message}"
+        )
+    payments.mark_succeeded(session, record, verify.provider_ref)
+    order = _finalize_paid_order(
+        session, company_id=company_id, order_id=order_id, actor_user_id=actor_user_id
+    )
+    return order, record
 
 
 def _issue_invoice_for_paid_order(session: Session, order: SalesOrder, actor_user_id: str | None) -> None:
@@ -394,36 +466,8 @@ def _issue_invoice_for_paid_order(session: Session, order: SalesOrder, actor_use
     session.flush()
 
 
-# ---- webhook stub for provider notifications (idempotent, verified) ----
-def handle_payment_webhook(session: Session, *, company_id: str, payload: dict, signature: str) -> dict:
-    """Replay-safe webhook: signature check + idempotency by event id."""
-    import hashlib
-    import hmac as hmac_mod
-    import json
-
-    from app.core.config import get_settings
-
-    secret = get_settings().secret_key.encode()
-    raw = json.dumps(payload, sort_keys=True).encode()
-    expected = hmac_mod.new(secret, raw, hashlib.sha256).hexdigest()
-    if signature != expected:
-        raise BusinessRuleError("WEBHOOK_BAD_SIGNATURE", "Webhook signature verification failed")
-    event_id = payload.get("event_id")
-    if not event_id:
-        raise BusinessRuleError("WEBHOOK_BAD_EVENT", "Missing event_id")
-
-    def _noop() -> dict:
-        return {"handled": True, "event_id": event_id}
-
-    result, replayed = run_idempotent(
-        session,
-        scope=f"webhook:{company_id}",
-        key=f"payment:{event_id}",
-        company_id=company_id,
-        execute=_noop,
-    )
-    result["replayed"] = replayed
-    return result
+# Provider webhooks are handled by modules/payments/webhooks.py: the old
+# SECRET_KEY-HMAC stub was replaced by real per-provider signature verification.
 
 
 # ---- later lifecycle: fulfillment transitions live in fulfillment module ----

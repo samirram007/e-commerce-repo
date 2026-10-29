@@ -20,6 +20,7 @@ import { titleCase } from "../../lib/format";
 import { fieldErrors } from "../../lib/zod-utils";
 import { FiscalYearsTab } from "./FiscalYearsTab";
 import { AppearanceTab } from "./AppearanceTab";
+import { PaymentGatewaysTab } from "./PaymentGatewaysTab";
 import {
   companiesQueryOptions,
   storageLocationsQueryOptions,
@@ -46,7 +47,7 @@ import {
   type TaxRateFormInput,
 } from "./schemas";
 
-type SettingsTab = "appearance" | "company" | "taxes" | "storage" | "fiscal";
+type SettingsTab = "appearance" | "company" | "taxes" | "storage" | "fiscal" | "gateways";
 
 const TABS: { key: SettingsTab; label: string }[] = [
   { key: "appearance", label: "Appearance" },
@@ -54,6 +55,7 @@ const TABS: { key: SettingsTab; label: string }[] = [
   { key: "taxes", label: "Tax rates" },
   { key: "storage", label: "Storage locations" },
   { key: "fiscal", label: "Fiscal years & periods" },
+  { key: "gateways", label: "Payment gateways" },
 ];
 
 export function SettingsPage() {
@@ -70,6 +72,7 @@ export function SettingsPage() {
       {tab === "taxes" ? <TaxRatesTab /> : null}
       {tab === "storage" ? <StorageTab /> : null}
       {tab === "fiscal" ? <FiscalYearsTab /> : null}
+      {tab === "gateways" ? <PaymentGatewaysTab /> : null}
     </>
   );
 }

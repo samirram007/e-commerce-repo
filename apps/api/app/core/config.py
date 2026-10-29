@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     app_env: str = "dev"  # dev | test | prod
     log_level: str = "INFO"
     secret_key: str = "dev-secret-change-me"
+    #: Fernet key for payment provider secrets at rest (see shared/crypto.py).
+    payment_encryption_key: str | None = None
+    #: Public base URL of this API — used to build provider webhook URLs.
+    public_api_base_url: str = "http://localhost:8000"
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 14
 
@@ -84,6 +88,13 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "APP_ENV=prod requires a strong SECRET_KEY "
                     "(set via environment or .env.production)"
+                )
+            if not (self.payment_encryption_key or "").strip():
+                raise ValueError(
+                    "APP_ENV=prod requires PAYMENT_ENCRYPTION_KEY (generate one "
+                    "with: python -c \"from cryptography.fernet import Fernet; "
+                    "print(Fernet.generate_key().decode())\"). Losing it makes "
+                    "every saved payment secret unreadable."
                 )
         return self
 

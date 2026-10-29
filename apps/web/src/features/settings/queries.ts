@@ -9,16 +9,21 @@ import {
   fetchCompanies,
   fetchFiscalYearPeriods,
   fetchFiscalYears,
+  fetchGateways,
   fetchStorageLocations,
   fetchTaxRates,
   forwardFiscalYear,
   postOpeningBalances,
+  switchGatewayMode,
+  testGateway,
   updateCompany,
+  updateGateway,
 } from "./api";
 import type {
   CompanyCreatePayload,
   CompanyUpdatePayload,
   FiscalYearPayload,
+  GatewayUpdatePayload,
   OpeningBalancesPayload,
   StorageLocationPayload,
   TaxRatePayload,
@@ -30,6 +35,7 @@ export const settingsKeys = {
   taxRates: () => [...settingsKeys.all, "tax-rates"] as const,
   locations: () => [...settingsKeys.all, "storage-locations"] as const,
   fiscalYears: () => [...settingsKeys.all, "fiscal-years"] as const,
+  gateways: () => [...settingsKeys.all, "payment-gateways"] as const,
   fiscalYearPeriods: (fiscalYearId: string) =>
     [...settingsKeys.all, "fiscal-year-periods", fiscalYearId] as const,
 };
@@ -110,6 +116,35 @@ export function useCreateFiscalYear() {
     mutationFn: (input: FiscalYearPayload) => createFiscalYear(input),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.fiscalYears() }),
   });
+}
+
+export function gatewaysQueryOptions() {
+  return queryOptions({
+    queryKey: settingsKeys.gateways(),
+    queryFn: fetchGateways,
+  });
+}
+
+export function useUpdateGateway() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ provider, input }: { provider: string; input: GatewayUpdatePayload }) =>
+      updateGateway(provider, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.gateways() }),
+  });
+}
+
+export function useSwitchGatewayMode() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ provider, mode }: { provider: string; mode: "test" | "live" }) =>
+      switchGatewayMode(provider, mode),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: settingsKeys.gateways() }),
+  });
+}
+
+export function useTestGateway() {
+  return useMutation({ mutationFn: (provider: string) => testGateway(provider) });
 }
 
 export function fiscalYearPeriodsQueryOptions(fiscalYearId: string) {

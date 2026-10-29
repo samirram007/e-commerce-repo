@@ -46,10 +46,6 @@ class PayIn(BaseModel):
     provider: str = "mock"
 
 
-class WebhookIn(BaseModel):
-    event_id: str | None = None
-    payload: dict = Field(default_factory=dict)
-
 
 def _cart_out(session: Session, cart) -> CartOut:
     quote = svc.quote_cart(session, cart)
@@ -196,15 +192,10 @@ def pay_order(
     }
 
 
-@router.post("/webhook/payment")
-def payment_webhook(
-    payload: WebhookIn,
-    x_signature: str = Header(default="", alias="X-Signature"),
-    ctx: CompanyCtx = Depends(guard(P_CART_CHECKOUT)),
-    session: Session = Depends(get_db),
-):
-    body = {**payload.payload, "event_id": payload.event_id}
-    return svc.handle_payment_webhook(session, company_id=ctx.company_id, payload=body, signature=x_signature)
+# The old authenticated POST /storefront/webhook/payment stub is gone: provider
+# servers cannot authenticate with a bearer token, so webhooks now live at
+# POST /api/v1/payments/webhooks/{provider}/{company_id} and authenticate with
+# the provider's own signature (modules/payments/webhooks.py).
 
 
 @router.get("/orders", response_model=list[dict])

@@ -45,6 +45,7 @@ class PaymentOut(BaseModel):
     direction: str
     provider: str
     provider_ref: str | None
+    mode: str | None = None
     method: str
     status: str
     amount: Decimal
@@ -52,11 +53,10 @@ class PaymentOut(BaseModel):
     occurred_at: datetime
     order_id: str | None
 
-
 def _out(r: PaymentRecord) -> PaymentOut:
     return PaymentOut(
         id=r.id, direction=r.direction, provider=r.provider, provider_ref=r.provider_ref,
-        method=r.method, status=r.status, amount=r.amount, currency=r.currency,
+        mode=r.mode, method=r.method, status=r.status, amount=r.amount, currency=r.currency,
         occurred_at=r.occurred_at, order_id=r.order_id,
     )
 

@@ -197,3 +197,22 @@ export async function payOrder(orderId: string, method: string): Promise<ShopOrd
   const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/pay`, { method });
   return response.data;
 }
+
+/** Provider callback fields sent to /payment/confirm — verified server-side. */
+export type PaymentConfirmPayload =
+  | {
+      razorpay_order_id: string;
+      razorpay_payment_id: string;
+      razorpay_signature: string;
+    }
+  | { payment_intent_id: string }
+  | { payment_id: string };
+
+/** Confirm a payment the browser completed (signature / intent verified by the API). */
+export async function confirmPayment(
+  orderId: string,
+  payload: PaymentConfirmPayload,
+): Promise<ShopOrder> {
+  const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/payment/confirm`, payload);
+  return response.data;
+}

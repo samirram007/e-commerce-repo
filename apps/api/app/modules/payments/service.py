@@ -186,48 +186,113 @@ def allocate_payment(
     return created
 
 
-# ---- (customer) returns/refunds use provider adapters ----
-def provider_charge(
-    session: Session, *, company_id: str, actor_user_id: str, customer_id: str | None,
-    order_id: str | None, amount, currency: str, method: str = "mock_gateway",
-    provider: str = "mock", idempotency_key: str,
-) -> PaymentRecord:
-    """Charge a customer through a provider. Idempotency handled by caller via
-    run_idempotent; provider_ref unique constraint is a second defense."""
+# ---- (customer) gateway charges: intents, capture confirmation, refunds ----
+def create_provider_intent(
+    session: Session, *, company_id: str, actor_user_id: str | None, customer_id: str | None,
+    order_id: str, receipt: str, amount, currency: str, method: str,
+    adapter, creds, idempotency_key: str,
+) -> tuple[PaymentRecord, "IntentResult"]:
+    """Create a provider payment intent for an order and record it as pending.
+
+    The browser collects the card through `intent.client_payload`; the order is
+    only marked paid later, once `verify_client_payment` or a webhook confirms
+    the money moved. Retries reuse the pending row for the same order+provider,
+    and the provider-side Idempotency-Key returns the same intent id.
+    """
+    from app.modules.payments.adapters import IntentResult
+
     company = _company(session, company_id)
-    adapter = get_adapter(provider)
-    result = adapter.charge(amount=money(dec(amount), 2), currency=currency, customer_ref=customer_id, idempotency_key=idempotency_key)
-    if not result.succeeded:
-        raise BusinessRuleError(
-            "PAYMENT_DECLINED", f"{result.error_code}: {result.message}"
-        )
-    exchange_rate = dec(rate_for(session, company_id=company_id, from_currency=currency, base_currency=company.base_currency, on_date=datetime.now(timezone.utc).date()))
-    record = PaymentRecord(
-        company_id=company_id,
-        direction="receipt",
-        method=method,
-        provider=adapter.name,
-        provider_ref=result.provider_ref,
-        status="succeeded",
+    intent: IntentResult = adapter.create_intent(
+        creds,
         amount=money(dec(amount), 2),
         currency=currency,
-        exchange_rate=exchange_rate,
-        amount_base=money(dec(amount) * exchange_rate, 2),
-        customer_id=customer_id,
-        order_id=order_id,
-        occurred_at=datetime.now(timezone.utc),
-        idempotency_scope="checkout",
-        created_by=actor_user_id,
+        receipt=receipt,
+        customer={"ref": customer_id} if customer_id else {},
+        idempotency_key=idempotency_key,
     )
-    session.add(record)
+    record = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.order_id == order_id,
+            PaymentRecord.provider == adapter.name,
+            PaymentRecord.direction == "receipt",
+            PaymentRecord.status.in_(("pending", "failed")),
+        ).order_by(PaymentRecord.occurred_at.desc())
+    )
+    if record is None:
+        exchange_rate = dec(
+            rate_for(
+                session, company_id=company_id, from_currency=currency,
+                base_currency=company.base_currency,
+                on_date=datetime.now(timezone.utc).date(),
+            )
+        )
+        record = PaymentRecord(
+            company_id=company_id,
+            direction="receipt",
+            method=method,
+            provider=adapter.name,
+            status="pending",
+            amount=money(dec(amount), 2),
+            currency=currency,
+            exchange_rate=exchange_rate,
+            amount_base=money(dec(amount) * exchange_rate, 2),
+            customer_id=customer_id,
+            order_id=order_id,
+            occurred_at=datetime.now(timezone.utc),
+            idempotency_scope="checkout",
+            created_by=actor_user_id,
+        )
+        session.add(record)
+    # A retry after a failure reuses the row (and the provider returns the same
+    # intent id for the same Idempotency-Key), so (provider, provider_ref) never
+    # collides and the order keeps a single payment history.
+    record.status = "pending"
+    record.provider_ref = intent.intent_id
+    record.mode = creds.mode
     session.flush()
+    return record, intent
+
+
+def mark_succeeded(session: Session, record: PaymentRecord, charge_ref: str | None = None) -> PaymentRecord:
+    """Flip a pending record to succeeded (webhook/client confirmation)."""
+    if record.status != "succeeded":
+        record.status = "succeeded"
+        if charge_ref and charge_ref != record.provider_ref and record.provider != "mock":
+            # Razorpay charges are refunded by payment id, not order id.
+            record.charge_ref = charge_ref
+        session.flush()
     return record
+
+
+def mark_failed(session: Session, record: PaymentRecord, message: str | None = None) -> PaymentRecord:
+    if record.status in ("pending", "failed"):
+        record.status = "failed"
+        if message:
+            record.notes = (f"{record.notes}\n" if record.notes else "") + f"Failed: {message}"[:400]
+        session.flush()
+    return record
+
+
+def pending_for_order(session: Session, order_id: str, provider: str | None = None) -> PaymentRecord | None:
+    stmt = select(PaymentRecord).where(
+        PaymentRecord.order_id == order_id,
+        PaymentRecord.direction == "receipt",
+        PaymentRecord.status == "pending",
+    )
+    if provider:
+        stmt = stmt.where(PaymentRecord.provider == provider)
+    return session.execute(stmt.order_by(PaymentRecord.occurred_at.desc())).scalars().first()
 
 
 def provider_refund(
     session: Session, *, company_id: str, actor_user_id: str, original: PaymentRecord, amount, currency: str | None = None,
 ) -> PaymentRecord:
-    """refund an amount back to the original charge reference."""
+    """refund an amount back to the original charge reference.
+
+    The refund runs against the **mode stored on the original payment**, so a
+    company that has since flipped to live keys still refunds test charges with
+    the test credentials they were made with.
+    """
     if original.direction != "receipt" or original.status != "succeeded":
         raise BusinessRuleError("NOT_REFUNDABLE", "Only succeeded receipts can be refunded")
     amount = money(dec(amount), 2)
@@ -236,14 +301,27 @@ def provider_refund(
     original_refunded = session.execute(
         select(func.sum(PaymentRecord.amount)).where(
             PaymentRecord.company_id == original.company_id,
-            PaymentRecord.provider_ref == f"refund_{original.provider_ref}",
+            (
+                (PaymentRecord.provider_ref == f"refund_{original.provider_ref}")
+                | (PaymentRecord.notes == f"Refund of {original.provider_ref}")
+            ),
             PaymentRecord.status.in_(["succeeded", "pending"]),
         )
     ).scalar() or Decimal("0")
     if dec(original_refunded) + amount > dec(original.amount):
         raise BusinessRuleError("REFUND_EXCEEDS", "Refund exceeds remaining refundable amount")
-    adapter = get_adapter(original.provider)
-    result = adapter.refund(provider_ref=original.provider_ref, amount=amount, currency=currency or original.currency, idempotency_key=f"refund:{original.provider_ref}:{amount}")
+    from app.modules.payments.gateways import get_gateway_by_name
+
+    adapter, creds, _config = get_gateway_by_name(
+        session, original.company_id, original.provider, mode=original.mode
+    )
+    result = adapter.refund(
+        creds,
+        provider_ref=original.charge_ref or original.provider_ref,
+        amount=amount,
+        currency=currency or original.currency,
+        idempotency_key=f"refund:{original.provider_ref}:{amount}",
+    )
     record = PaymentRecord(
         company_id=original.company_id,
         direction="receipt",
@@ -251,6 +329,7 @@ def provider_refund(
         provider=adapter.name,
         provider_ref=result.provider_ref,
         status="succeeded",
+        mode=original.mode,
         amount=amount,
         currency=currency or original.currency,
         exchange_rate=original.exchange_rate,
