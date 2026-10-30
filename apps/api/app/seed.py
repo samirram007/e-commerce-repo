@@ -21,9 +21,11 @@ from app.modules.identity import service as identity
 from app.modules.partners import service as partners
 from app.modules.payroll import service as payroll
 from app.modules.storage import service as storage
-from app.modules.taxes import service as taxes
 
 logger = logging.getLogger("erp.seed")
+
+#: Name of the demo company the seed tops up (never a leftover test company).
+DEMO_COMPANY_NAME = "Demo Retail Co"
 
 
 def run_seed() -> None:
@@ -50,15 +52,17 @@ def run_seed() -> None:
         identity.ensure_system_roles(session)
         session.commit()
 
-        company = None
-        for c in companies.list_companies_for_user(session, admin.id):
-            company = c
-            break
+        # A dev database may hold leftover test companies owned by the same
+        # admin; always top up the demo company when it exists.
+        candidates = companies.list_companies_for_user(session, admin.id)
+        company = next((c for c in candidates if c.name == DEMO_COMPANY_NAME), None)
+        if company is None and candidates:
+            company = candidates[0]
         created_company = False
         if company is None and settings.seed_demo_data:
             company = companies.create_company(
                 session,
-                name="Demo Retail Co",
+                name=DEMO_COMPANY_NAME,
                 legal_name="Demo Retail Company Ltd",
                 base_currency="INR",
                 owner_user_id=admin.id,
@@ -68,9 +72,17 @@ def run_seed() -> None:
 
         # Currency + public storefront settings for the demo company.
         companies.ensure_currency(session, "INR", "Indian Rupee")
+        logger.info("seeding company %s (%s)", company.name, company.id)
         if not company.storefront_slug:
             company.storefront_slug = "default"
+        # invoice header details (printed on the GST invoice); demo values only
+        if not company.address:
+            company.address = "12 MG Road, Bengaluru, Karnataka 560001, India"
+        if not company.tax_identifier:
+            company.tax_identifier = "29ABCDE1234F1Z5"
         company.allow_guest_checkout = True
+        if (company.base_currency or "").upper() != "INR":
+            company.base_currency = "INR"
         session.flush()
 
         if settings.seed_demo_data:
@@ -86,21 +98,7 @@ def run_seed() -> None:
                 )
                 fy = fiscal.resolve_fiscal_year(session, company_id=company.id, on_date=date.today())
             create_default_chart(session, company=company)
-            if taxes.default_sales_tax_id(session, company.id) is None:
-                session.commit()
-                from app.modules.taxes.models import TaxRate
-
-                session.add(
-                    TaxRate(
-                        company_id=company.id,
-                        code="VAT10",
-                        name="Sales VAT 10%",
-                        percentage=10,
-                        is_default_sales=True,
-                        is_default_purchase=True,
-                        created_by=admin.id,
-                    )
-                )
+            _seed_taxes(session, company, admin)
             demo_warehouse = None
             for loc in storage.list_locations(session, company.id):
                 if loc.location_type in storage.FACILITY_TYPES:
@@ -242,6 +240,18 @@ def _seed_demo_users(session, company, admin, password: str) -> None:
 
 
 # (sku, name, category_path, uom, stock_type, cost, price, barcode, batches, serials, active, sellable, purchasable)
+#: HSN (goods) / SAC (services) code per demo leaf category, printed on GST invoices.
+_HSN_BY_CATEGORY = {
+    "Electronics": "8517",
+    "Phones": "8517",
+    "Laptops": "8471",
+    "Accessories": "8473",
+    "Apparel": "6109",
+    "Home & Kitchen": "7323",
+    "Grocery": "2106",
+    "Services": "9987",
+}
+
 _DEMO_PRODUCTS = [
     # original three (kept identical so existing databases match)
     ("SKU-001", "Demo Widget Small", ("Accessories",), "PCS", "stock", "8.00", "19.99", "8901234000011", False, False, True, True, True),
@@ -284,6 +294,47 @@ _DEMO_PRODUCTS = [
     ("SKU-SVC-002", "Installation Service", ("Services",), "HR", "service", "0", "49.00", None, False, False, True, True, False),
     ("SKU-SVC-003", "Extended Warranty 1 Year", ("Services",), "PCS", "service", "0", "79.00", None, False, False, True, True, False),
     ("SKU-SVC-004", "Gift Wrapping", ("Services",), "PCS", "service", "0", "4.99", None, False, False, True, True, False),
+    # audio
+    ("SKU-AUD-001", "Studio Over-Ear Headphones", ("Electronics", "Audio"), "PCS", "stock", "55.00", "129.00", "8901234000226", False, False, True, True, True),
+    ("SKU-AUD-002", "Smart Speaker Mini", ("Electronics", "Audio"), "PCS", "stock", "28.00", "69.99", "8901234000233", False, False, True, True, True),
+    ("SKU-AUD-003", "Soundbar 2.1 Channel", ("Electronics", "Audio"), "PCS", "stock", "70.00", "159.00", "8901234000240", False, False, True, True, True),
+    # wearables
+    ("SKU-WER-001", "Pulse Smartwatch 44mm", ("Electronics", "Wearables"), "PCS", "stock", "90.00", "199.00", "8901234000257", False, True, True, True, True),
+    ("SKU-WER-002", "Fitness Band Lite", ("Electronics", "Wearables"), "PCS", "stock", "18.00", "49.99", "8901234000264", False, False, True, True, True),
+    ("SKU-WER-003", "Wireless Charge Dock", ("Electronics", "Wearables"), "PCS", "stock", "15.00", "39.99", None, False, False, True, True, True),
+    # cameras
+    ("SKU-CAM-001", "Action Cam 4K", ("Electronics", "Cameras"), "PCS", "stock", "120.00", "249.00", "8901234000271", False, True, True, True, True),
+    ("SKU-CAM-002", "Tripod 160cm", ("Electronics", "Cameras"), "PCS", "stock", "12.00", "29.99", None, False, False, True, True, True),
+    ("SKU-CAM-003", "64GB SD Card", ("Electronics", "Cameras"), "PCS", "stock", "6.00", "17.99", "8901234000288", False, False, True, True, True),
+    # tablets
+    ("SKU-TAB-001", "Nova Tab 11", ("Electronics", "Tablets"), "PCS", "stock", "210.00", "399.00", "8901234000295", False, True, True, True, True),
+    ("SKU-TAB-002", "Kids Tab 8", ("Electronics", "Tablets"), "PCS", "stock", "80.00", "149.00", "8901234000301", False, False, True, True, True),
+    # sports & outdoors
+    ("SKU-SPT-001", "Yoga Mat 6mm", ("Sports & Outdoors",), "PCS", "stock", "9.00", "24.99", None, False, False, True, True, True),
+    ("SKU-SPT-002", "Insulated Water Bottle 1L", ("Sports & Outdoors",), "PCS", "stock", "7.00", "21.99", "8901234000318", False, False, True, True, True),
+    ("SKU-SPT-003", "Camping Lantern", ("Sports & Outdoors",), "PCS", "stock", "11.00", "26.99", None, False, False, True, True, True),
+    ("SKU-FIT-001", "Adjustable Dumbbell 20kg", ("Sports & Outdoors", "Fitness"), "PCS", "stock", "45.00", "109.00", "8901234000325", False, False, True, True, True),
+    ("SKU-FIT-002", "Resistance Band Set", ("Sports & Outdoors", "Fitness"), "BOX", "stock", "5.00", "16.99", None, False, False, True, True, True),
+    ("SKU-FIT-003", "Foam Roller", ("Sports & Outdoors", "Fitness"), "PCS", "stock", "6.00", "18.99", None, False, False, True, True, True),
+    ("SKU-CYC-001", "Bike Helmet M", ("Sports & Outdoors", "Cycling"), "PCS", "stock", "22.00", "54.99", "8901234000332", False, False, True, True, True),
+    ("SKU-CYC-002", "Bike Light Set", ("Sports & Outdoors", "Cycling"), "BOX", "stock", "8.00", "22.99", None, False, False, True, True, True),
+    # beauty & personal care (batch-tracked with expiry)
+    ("SKU-BTY-001", "Vitamin C Serum 30ml", ("Beauty & Personal Care",), "PCS", "stock", "6.00", "21.99", "8901234000349", True, False, True, True, True),
+    ("SKU-BTY-002", "Daily Sunscreen SPF50", ("Beauty & Personal Care",), "PCS", "stock", "5.00", "17.99", "8901234000356", True, False, True, True, True),
+    ("SKU-SKN-001", "Aloe Face Wash 150ml", ("Beauty & Personal Care", "Skincare"), "PCS", "stock", "3.20", "11.99", None, True, False, True, True, True),
+    ("SKU-SKN-002", "Hydrating Night Cream", ("Beauty & Personal Care", "Skincare"), "PCS", "stock", "7.50", "24.99", "8901234000363", True, False, True, True, True),
+    # toys & games
+    ("SKU-TOY-001", "Wooden Puzzle Set", ("Toys & Games",), "BOX", "stock", "7.00", "19.99", None, False, False, True, True, True),
+    ("SKU-TOY-002", "RC Car 1:18", ("Toys & Games",), "PCS", "stock", "16.00", "39.99", "8901234000370", False, False, True, True, True),
+    # stationery
+    ("SKU-STN-001", "A5 Dotted Notebook", ("Stationery",), "PCS", "stock", "3.00", "9.99", None, False, False, True, True, True),
+    ("SKU-STN-002", "Gel Pen Pack of 10", ("Stationery",), "BOX", "stock", "1.60", "6.99", None, False, False, True, True, True),
+    ("SKU-STN-003", "Desk Organiser", ("Stationery",), "PCS", "stock", "8.00", "22.99", "8901234000387", False, False, True, True, True),
+    # grocery: beverages & snacks (batch-tracked)
+    ("SKU-GRV-005", "Cold Brew Concentrate 500ml", ("Grocery", "Beverages"), "PCS", "stock", "4.50", "11.99", "8901234000394", True, False, True, True, True),
+    ("SKU-GRV-006", "Sparkling Water 6 Pack", ("Grocery", "Beverages"), "BOX", "stock", "3.20", "8.49", None, True, False, True, True, True),
+    ("SKU-GRV-007", "Roasted Almonds 250g", ("Grocery", "Snacks"), "PCS", "stock", "4.80", "12.99", "8901234000400", True, False, True, True, True),
+    ("SKU-GRV-008", "Dark Chocolate 70% 100g", ("Grocery", "Snacks"), "PCS", "stock", "2.50", "6.49", None, True, False, True, True, True),
 ]
 
 _DEMO_CATEGORIES = [
@@ -295,6 +346,19 @@ _DEMO_CATEGORIES = [
     ("Home & Kitchen", None),
     ("Grocery", None),
     ("Services", None),
+    ("Audio", "Electronics"),
+    ("Wearables", "Electronics"),
+    ("Cameras", "Electronics"),
+    ("Tablets", "Electronics"),
+    ("Sports & Outdoors", None),
+    ("Fitness", "Sports & Outdoors"),
+    ("Cycling", "Sports & Outdoors"),
+    ("Beauty & Personal Care", None),
+    ("Skincare", "Beauty & Personal Care"),
+    ("Toys & Games", None),
+    ("Stationery", None),
+    ("Beverages", "Grocery"),
+    ("Snacks", "Grocery"),
 ]
 
 #: Demo prices were authored in USD; the store trades in INR, so scale them.
@@ -306,20 +370,183 @@ def _to_inr(amount: str) -> str:
     return str((Decimal(amount) * _DEMO_USD_TO_INR).quantize(Decimal("0.01")))
 
 
-#: (pincode, eta_days, cod_allowed) — demo delivery zones for the storefront.
+#: (pincode, eta_days, cod_allowed) — demo delivery zones across India.
 _DEMO_ZONES = [
+    # Karnataka
     ("560001", 2, True),
     ("560002", 2, True),
-    ("560003", 3, True),
+    ("560034", 2, True),
+    ("560103", 3, True),
+    # Delhi NCR
+    ("110001", 3, True),
+    ("110016", 4, False),
+    ("122001", 3, True),
+    ("201301", 3, True),
+    # Maharashtra
     ("400001", 3, True),
-    ("110001", 4, False),
-    ("999999", 5, False),
+    ("400051", 3, True),
+    ("411001", 3, True),
+    ("440001", 4, True),
+    # South
+    ("600001", 4, True),
+    ("600042", 4, True),
+    ("500001", 3, True),
+    ("500081", 3, False),
+    ("641001", 4, True),
+    ("682001", 5, True),
+    ("695001", 5, True),
+    ("570001", 4, True),
+    # West & Central
+    ("700001", 5, True),
+    ("380001", 3, True),
+    ("302001", 4, True),
+    ("462001", 5, True),
+    ("492001", 5, False),
+    ("403001", 5, False),
+    # North & East
+    ("226001", 4, True),
+    ("208001", 4, True),
+    ("160017", 4, True),
+    ("248001", 5, True),
+    ("751001", 6, False),
+    ("800001", 6, False),
+    ("834001", 6, False),
+    ("781001", 6, False),
 ]
 
 
+#: (prefix, eta_days, cod_allowed) — state-wide coverage. The first two digits
+#: of an Indian PIN identify its postal circle, so one row per circle covers the
+#: whole state; exact city PINs above override these with faster ETAs.
+_DEMO_ZONE_PREFIXES = [
+    ("11", 4, True),   # Delhi
+    ("12", 4, True),   # Haryana
+    ("13", 5, True),
+    ("14", 5, True),   # Punjab
+    ("15", 5, True),
+    ("16", 5, True),
+    ("17", 6, False),  # Himachal Pradesh
+    ("18", 7, False),  # Jammu & Kashmir
+    ("19", 8, False),  # Ladakh
+    ("20", 6, True),   # Uttar Pradesh / Uttarakhand
+    ("21", 6, True),
+    ("22", 6, True),
+    ("23", 6, True),
+    ("24", 6, True),
+    ("25", 6, True),
+    ("26", 6, True),
+    ("27", 6, True),
+    ("28", 6, True),
+    ("30", 5, True),   # Rajasthan
+    ("31", 5, True),
+    ("32", 5, True),
+    ("33", 6, True),
+    ("34", 6, True),
+    ("36", 5, True),   # Gujarat
+    ("37", 5, True),
+    ("38", 4, True),
+    ("39", 6, False),
+    ("40", 3, True),   # Maharashtra (Mumbai / Konkan)
+    ("41", 3, True),   # Pune
+    ("42", 4, True),
+    ("43", 5, True),
+    ("44", 4, True),
+    ("45", 6, True),   # Madhya Pradesh
+    ("46", 6, True),
+    ("47", 6, True),
+    ("48", 6, True),
+    ("49", 6, False),  # Chhattisgarh
+    ("50", 4, True),   # Telangana
+    ("51", 5, True),   # Andhra Pradesh
+    ("52", 5, True),
+    ("53", 5, True),
+    ("56", 3, True),   # Karnataka
+    ("57", 4, True),
+    ("58", 5, True),
+    ("59", 5, True),
+    ("60", 4, True),   # Tamil Nadu
+    ("61", 5, True),
+    ("62", 5, True),
+    ("63", 5, True),
+    ("64", 5, True),
+    ("67", 5, True),   # Kerala
+    ("68", 5, True),
+    ("69", 5, True),
+    ("70", 4, True),   # West Bengal
+    ("71", 5, True),
+    ("72", 5, True),
+    ("73", 6, False),
+    ("74", 6, False),
+    ("75", 6, False),  # Odisha
+    ("76", 6, False),
+    ("77", 6, False),
+    ("78", 7, False),  # Assam
+    ("79", 7, False),  # North East
+    ("80", 6, True),   # Bihar
+    ("81", 6, True),
+    ("82", 6, True),
+    ("83", 6, True),   # Jharkhand
+    ("84", 6, True),
+    ("85", 6, True),
+]
+
+
+#: Demo pricing uses the Indian GST slabs; 18% is what the storefront charges by default.
+_GST_SLABS = [(5, "GST5", "GST 5%"), (12, "GST12", "GST 12%"), (18, "GST18", "GST 18%")]
+
+
+def _seed_taxes(session, company, admin) -> None:
+    """Give the demo company real GST slabs (5 / 12 / 18, 18% default).
+
+    The original demo seed created one fake "Sales VAT 10%" rate; it is retired
+    here so carts, orders and invoices show a proper GST slab. Demo defaults are
+    authoritative: 18% is the single default for sales and purchases.
+    """
+    from sqlalchemy import select
+
+    from app.modules.taxes.models import TaxRate
+
+    rows = list(
+        session.execute(select(TaxRate).where(TaxRate.company_id == company.id)).scalars()
+    )
+    for row in rows:
+        if row.code == "VAT10" or row.name == "Sales VAT 10%":
+            session.delete(row)
+    session.flush()
+
+    existing = {row.code: row for row in rows if row.code != "VAT10"}
+    for percentage, code, name in _GST_SLABS:
+        rate = existing.get(code)
+        if rate is None:
+            rate = TaxRate(company_id=company.id, code=code, name=name, created_by=admin.id)
+            session.add(rate)
+        rate.name = name
+        rate.percentage = percentage
+        rate.is_active = True
+    session.flush()
+
+    for rate in session.execute(
+        select(TaxRate).where(TaxRate.company_id == company.id)
+    ).scalars():
+        rate.is_default_sales = rate.code == "GST18"
+        rate.is_default_purchase = rate.code == "GST18"
+    session.flush()
+
+
 def _seed_storefront_zones(session, company, admin) -> None:
-    """Demo pincode delivery zones so the storefront pincode check resolves."""
+    """Delivery coverage: state-wide prefixes plus exact city PINs (faster ETA,
+    COD policy) so any valid Indian PIN resolves."""
     from app.modules.storefront import service as storefront
+
+    for prefix, eta_days, cod_allowed in _DEMO_ZONE_PREFIXES:
+        storefront.set_delivery_zone(
+            session,
+            company.id,
+            pincode=prefix,
+            deliverable=True,
+            eta_days=eta_days,
+            cod_allowed=cod_allowed,
+        )
 
     for pincode, eta_days, cod_allowed in _DEMO_ZONES:
         storefront.set_delivery_zone(
@@ -379,6 +606,7 @@ def _seed_demo_catalog(session, company, admin) -> None:
                 "category_id": category_id[cat_path[-1]],
                 "uom_id": uom_id.get(uom),
                 "barcode": barcode,
+                "hsn_sac": _HSN_BY_CATEGORY.get(cat_path[-1]),
                 "stock_type": stock_type,
                 "track_batches": batches,
                 "track_serials": serials,
@@ -393,6 +621,20 @@ def _seed_demo_catalog(session, company, admin) -> None:
     if created:
         logger.info("seeded %d demo products", created)
 
+    # top up HSN/SAC codes on demo products seeded before the field existed
+    hsn_by_sku = {sku: _HSN_BY_CATEGORY.get(cat_path[-1]) for sku, _n, cat_path, *_ in _DEMO_PRODUCTS}
+    coded = 0
+    for product in session.execute(
+        select(Product).where(Product.company_id == company.id)
+    ).scalars():
+        hsn = hsn_by_sku.get(product.sku)
+        if hsn and not product.hsn_sac:
+            product.hsn_sac = hsn
+            coded += 1
+    if coded:
+        session.flush()
+        logger.info("set HSN/SAC on %d demo products", coded)
+
 
 _DEMO_PARTNER_CUSTOMERS = [
     # (code, name, email, phone, payment_term_days, credit_limit)
@@ -405,6 +647,12 @@ _DEMO_PARTNER_CUSTOMERS = [
     ("C-007", "Junction Mart", "orders@junctionmart.example.com", "+1 555 0106", 45, "12000"),
     ("C-008", "Keystone Wholesale", "accounts@keystonewholesale.example.com", "+1 555 0107", 60, "25000"),
     ("C-009", "Luminary Gifts", "gifts@luminary.example.com", "+1 555 0108", 0, "1500"),
+]
+
+#: Business buyers carry a GSTIN, so their printed invoices show a registered buyer.
+_DEMO_B2B_CUSTOMERS = [
+    # (code, name, email, phone, payment_term_days, credit_limit, GSTIN)
+    ("C-010", "Acme Traders Pvt Ltd", "accounts@acmetraders.example.com", "+91 80 4000 1234", 30, "50000", "29AABCA1234B1Z6"),
 ]
 
 _DEMO_PARTNER_VENDORS = [
@@ -441,6 +689,26 @@ def _seed_demo_partners(session, company, admin) -> None:
                 "phone": phone,
                 "payment_term_days": terms,
                 "credit_limit": credit,
+            },
+        )
+        created += 1
+
+    for code, name, email, phone, terms, credit, gstin in _DEMO_B2B_CUSTOMERS:
+        if code in cust_codes:
+            continue
+        partners.create_customer(
+            session,
+            company_id=company.id,
+            actor_user_id=admin.id,
+            data={
+                "code": code,
+                "name": name,
+                "email": email,
+                "phone": phone,
+                "payment_term_days": terms,
+                "credit_limit": credit,
+                "tax_identifier": gstin,
+                "notes": "Demo B2B account (GST registered)",
             },
         )
         created += 1
@@ -550,6 +818,8 @@ _DEMO_ORDERS = [
     dict(customer="C-006", lines=[("SKU-APP-004", 1)], shipping="5.00", backdate=30, pay=True, ship="failed"),
     dict(customer="C-007", lines=[("SKU-GRV-004", 2)], shipping="5.00", backdate=33, pay=True, ship="returned_to_origin"),
     dict(customer="C-008", lines=[("SKU-ACC-005", 10)], shipping="0", backdate=2, cancel=True),
+    # B2B buyer with a GSTIN — a delivered invoice shows a registered buyer
+    dict(customer="C-010", lines=[("SKU-LAP-001", 2), ("SKU-ACC-001", 2)], shipping="5.00", backdate=4, pay=True, ship="delivered"),
 ]
 
 # shipment status walk starting from 'picking' (create_shipment's initial state)

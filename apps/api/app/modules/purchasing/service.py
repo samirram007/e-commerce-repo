@@ -217,6 +217,51 @@ def receive_goods(
     return receipt
 
 
+def _input_tax_lines(
+    session: Session,
+    company_id: str,
+    codes: dict[str, str],
+    tax_total: Decimal,
+    tax_by_slab: list[tuple[Decimal, Decimal]],
+    precision: int,
+    *,
+    party_ref: str | None,
+) -> list[JournalLineSpec]:
+    """Input tax debit split into CGST/SGST tax-credit accounts where the chart
+    has them; the SGST leg takes the remainder so the entry stays balanced. Falls
+    back to the single tax account on charts created before the GST split."""
+    if tax_total <= 0:
+        return []
+    gst_codes = accounting.gst_input_codes(session, company_id, codes)
+    if gst_codes is None:
+        return [
+            JournalLineSpec(
+                account_code=codes["sales_tax_payable"],
+                side="debit",
+                amount_base=tax_total,
+                description="Input tax",
+                party_ref=party_ref,
+            )
+        ]
+    cgst = taxes.cgst_share(tax_by_slab, precision=precision)
+    return [
+        JournalLineSpec(
+            account_code=gst_codes[0],
+            side="debit",
+            amount_base=cgst,
+            description="Input CGST",
+            party_ref=party_ref,
+        ),
+        JournalLineSpec(
+            account_code=gst_codes[1],
+            side="debit",
+            amount_base=money(tax_total - cgst, precision),
+            description="Input SGST",
+            party_ref=party_ref,
+        ),
+    ]
+
+
 def create_bill_from_receipt(
     session: Session, *, company_id: str, receipt_id: str, actor_user_id: str,
     bill_date: date, vendor_ref: str | None = None, notes: str | None = None,
@@ -242,6 +287,7 @@ def create_bill_from_receipt(
 
     inventory_value = Decimal("0")
     tax_total = Decimal("0")
+    tax_by_slab: list[tuple[Decimal, Decimal]] = []
     precision = 2
     doc_number = allocate_number(session, company_id, "vendor_bill")
     bill = VendorBill(
@@ -265,7 +311,12 @@ def create_bill_from_receipt(
     for gr_line in gr_lines:
         po_line = session.get(PurchaseOrderLine, gr_line.order_line_id)
         line_total = money(dec(gr_line.qty_received) * dec(gr_line.unit_cost), precision)
-        tax_amount = money(dec(line_total) * dec(taxes.get_tax_rate(session, company_id, po_line.tax_rate_id).percentage if po_line and po_line.tax_rate_id else 0) / Decimal("100"), precision)
+        percentage = (
+            dec(taxes.get_tax_rate(session, company_id, po_line.tax_rate_id).percentage)
+            if po_line and po_line.tax_rate_id
+            else Decimal("0")
+        )
+        tax_amount = money(dec(line_total) * percentage / Decimal("100"), precision)
         session.add(
             VendorBillLine(
                 bill_id=bill.id,
@@ -280,6 +331,7 @@ def create_bill_from_receipt(
         )
         inventory_value += line_total
         tax_total += tax_amount
+        tax_by_slab.append((percentage, tax_amount))
 
     inventory_value = money(inventory_value, precision)
     tax_total = money(tax_total, precision)
@@ -298,11 +350,8 @@ def create_bill_from_receipt(
                 amount_base=inventory_value,
                 description=f"Goods received PO {order.doc_number}",
             ),
-            JournalLineSpec(
-                account_code=codes["sales_tax_payable"],
-                side="debit",
-                amount_base=tax_total,
-                description="Input tax",
+            *_input_tax_lines(
+                session, company_id, codes, tax_total, tax_by_slab, precision,
                 party_ref=vendor.id,
             ),
             JournalLineSpec(
@@ -348,11 +397,14 @@ def create_bill_adhoc(
     codes = accounting.account_code_map(session, company_id)
     specs: list[JournalLineSpec] = []
     total = Decimal("0")
+    tax_total = Decimal("0")
+    tax_by_slab: list[tuple[Decimal, Decimal]] = []
     for index, line in enumerate(lines, start=1):
         qty = dec(line["qty"])
         unit_cost = dec(line["unit_cost"])
         line_total = money(qty * unit_cost, 2)
-        tax = money(line_total * dec(line.get("tax_percentage", 0)) / Decimal("100"), 2)
+        percentage = dec(line.get("tax_percentage", 0))
+        tax = money(line_total * percentage / Decimal("100"), 2)
         product_id = line.get("product_id")
         session.add(
             VendorBillLine(
@@ -374,17 +426,15 @@ def create_bill_adhoc(
                 description=line.get("description"),
             )
         )
-        if tax > 0:
-            specs.append(
-                JournalLineSpec(
-                    account_code=codes["sales_tax_payable"],
-                    side="debit",
-                    amount_base=tax,
-                    party_ref=vendor.id,
-                    description="Input tax",
-                )
-            )
+        tax_total += tax
+        tax_by_slab.append((percentage, tax))
         total += line_total + tax
+    specs.extend(
+        _input_tax_lines(
+            session, company_id, codes, money(tax_total, 2), tax_by_slab, 2,
+            party_ref=vendor.id,
+        )
+    )
     specs.append(
         JournalLineSpec(
             account_code=codes["ap"], side="credit", amount_base=money(total, 2),

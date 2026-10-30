@@ -103,8 +103,9 @@ def get_gateway_by_name(
         )
     )
     if config is None:
-        if provider == "mock":
-            return get_adapter("mock"), MOCK_CREDS, None
+        if provider in ("mock", "cash"):
+            # Offline providers need no stored config (cash = COD refunds).
+            return get_adapter(provider), MOCK_CREDS, None
         raise NotFoundError("Payment gateway")
     return (
         get_adapter(provider),

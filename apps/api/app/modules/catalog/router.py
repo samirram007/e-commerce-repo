@@ -48,11 +48,18 @@ class ProductIn(BaseModel):
     category_id: str | None = None
     uom_id: str | None = None
     barcode: str | None = Field(default=None, max_length=64)
+    # HSN (goods) / SAC (services) code printed on GST invoices
+    hsn_sac: str | None = Field(default=None, max_length=12)
     stock_type: str = "stock"
     track_batches: bool = False
     track_serials: bool = False
     base_cost: Decimal = Decimal("0")
     base_price: Decimal = Decimal("0")
+    # shipping: third-party carriers rate a parcel by weight and size
+    weight_kg: Decimal | None = Field(default=None, ge=0)
+    length_cm: Decimal | None = Field(default=None, ge=0)
+    width_cm: Decimal | None = Field(default=None, ge=0)
+    height_cm: Decimal | None = Field(default=None, ge=0)
     default_tax_rate_id: str | None = None
     is_active: bool = True
     is_sellable: bool = True
@@ -65,11 +72,16 @@ class ProductUpdateIn(BaseModel):
     category_id: str | None = None
     uom_id: str | None = None
     barcode: str | None = None
+    hsn_sac: str | None = None
     stock_type: str | None = None
     track_batches: bool | None = None
     track_serials: bool | None = None
     base_cost: Decimal | None = None
     base_price: Decimal | None = None
+    weight_kg: Decimal | None = Field(default=None, ge=0)
+    length_cm: Decimal | None = Field(default=None, ge=0)
+    width_cm: Decimal | None = Field(default=None, ge=0)
+    height_cm: Decimal | None = Field(default=None, ge=0)
     default_tax_rate_id: str | None = None
     is_active: bool | None = None
     is_sellable: bool | None = None
@@ -86,11 +98,17 @@ class ProductOut(BaseModel):
     category_id: str | None
     uom_id: str | None
     barcode: str | None
+    hsn_sac: str | None
     stock_type: str
     track_batches: bool
     track_serials: bool
     base_cost: Decimal
     base_price: Decimal
+    # shipping (used when a third-party carrier rates the parcel)
+    weight_kg: Decimal | None = None
+    length_cm: Decimal | None = None
+    width_cm: Decimal | None = None
+    height_cm: Decimal | None = None
     default_tax_rate_id: str | None
     image_file_id: str | None
     is_active: bool

@@ -29,11 +29,15 @@ DEFAULT_CHART: list[tuple[str, str, str, str]] = [
     ("1010", "Bank Account", "asset", "debit"),
     ("1100", "Accounts Receivable", "asset", "debit"),
     ("1150", "Sales Tax Payable (AR side)", "asset", "debit"),
+    ("1160", "Input CGST (Tax Credit)", "asset", "debit"),
+    ("1170", "Input SGST (Tax Credit)", "asset", "debit"),
     ("1200", "Inventory", "asset", "debit"),
     ("1250", "Stock in Transit", "asset", "debit"),
     ("1300", "Prepaid Expenses", "asset", "debit"),
     ("2000", "Accounts Payable", "liability", "credit"),
     ("2100", "Sales Tax Payable", "liability", "credit"),
+    ("2110", "CGST Payable", "liability", "credit"),
+    ("2120", "SGST Payable", "liability", "credit"),
     ("2200", "Accrued Liabilities", "liability", "credit"),
     ("2300", "Customer Credits", "liability", "credit"),
     ("3000", "Owner's Equity", "equity", "credit"),
@@ -64,6 +68,11 @@ DEFAULT_ROLE_CODES = {
     "stock_in_transit": "1250",
     "ap": "2000",
     "sales_tax_payable": "2100",
+    "input_cgst": "1160",
+    "input_sgst": "1170",
+    # GST is posted as two components on invoices and credit notes
+    "cgst_payable": "2110",
+    "sgst_payable": "2120",
     "owner_equity": "3000",
     "retained_earnings": "3100",
     "sales_revenue": "4000",
@@ -135,6 +144,47 @@ def account_code_map(session: Session, company_id: str) -> dict[str, str]:
     if company and company.default_account_codes:
         overrides = __import__("json").loads(company.default_account_codes)
     return {role: overrides.get(role, code) for role, code in DEFAULT_ROLE_CODES.items()}
+
+
+def _gst_pair(
+    session: Session,
+    company_id: str,
+    codes: dict[str, str],
+    cgst_role: str,
+    sgst_role: str,
+) -> tuple[str, str] | None:
+    """(CGST, SGST) codes for a role pair, or None when the chart predates the
+    GST split (charts created before the CGST/SGST accounts existed)."""
+    cgst = codes.get(cgst_role)
+    sgst = codes.get(sgst_role)
+    if not cgst or not sgst or cgst == sgst:
+        return None
+    existing = set(
+        session.execute(
+            select(Account.code).where(
+                Account.company_id == company_id, Account.code.in_([cgst, sgst])
+            )
+        ).scalars()
+    )
+    return (cgst, sgst) if {cgst, sgst} <= existing else None
+
+
+def gst_payable_codes(
+    session: Session, company_id: str, codes: dict[str, str] | None = None
+) -> tuple[str, str] | None:
+    """(CGST, SGST) output tax payable codes, or None when the company only has
+    the single tax account."""
+    codes = codes or account_code_map(session, company_id)
+    return _gst_pair(session, company_id, codes, "cgst_payable", "sgst_payable")
+
+
+def gst_input_codes(
+    session: Session, company_id: str, codes: dict[str, str] | None = None
+) -> tuple[str, str] | None:
+    """(CGST, SGST) input tax credit codes, or None when the chart has only the
+    single tax account."""
+    codes = codes or account_code_map(session, company_id)
+    return _gst_pair(session, company_id, codes, "input_cgst", "input_sgst")
 
 
 def post_journal_entry(
@@ -380,6 +430,97 @@ def trial_balance(
             "balance": signed,
         })
     return out
+
+
+def gst_summary(
+    session: Session,
+    company_id: str,
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+) -> dict:
+    """GST summary per period: net output CGST/SGST (2110/2120) against
+    input CGST/SGST (1160/1170) tax credits.
+
+    Returns a dict with output, input, and net amounts per component.
+    The ``net`` = output_credit - input_debit. A positive net means the
+    company owes GST; a negative net means input credit exceeds output.
+    """
+    q_from = f"JournalEntry.entry_date >= {from_date!s}" if from_date else "1=1"
+    q_to = f"JournalEntry.entry_date <= {to_date!s}" if to_date else "1=1"
+    rows = session.execute(
+        select(
+            JournalEntry.entry_date,
+            Account.code,
+            JournalLine.side,
+            func.sum(JournalLine.amount).label("total"),
+        )
+        .join(JournalLine, JournalEntry.id == JournalLine.entry_id)
+        .join(Account, JournalLine.account_id == Account.id)
+        .where(JournalEntry.company_id == company_id, JournalEntry.status == "posted",
+               q_from, q_to)
+        .group_by(JournalEntry.entry_date, Account.code, JournalLine.side)
+        .order_by(JournalEntry.entry_date, Account.code, JournalLine.side)
+    ).all()
+    # Accumulate per date
+    by_date: dict[str, dict[str, dict[str, Decimal]]] = {}
+    for entry_date, code, side, total in rows:
+        d = by_date.setdefault(entry_date.strftime("%Y-%m-%d"), {
+            "output": {"2110": Decimal("0"), "2120": Decimal("0")},
+            "input": {"1160": Decimal("0"), "1170": Decimal("0")},
+        })
+        if code in {"2110", "2120", "1160", "1170"}:
+            by_key = "output" if code in {"2110", "2120"} else "input"
+            by_code = d[by_key]
+            by_code[code] += dec(total)
+    # Build per-date net summaries
+    out = []
+    for date_str, d in sorted(by_date.items()):
+        out_cgst = d["output"]["2110"] - d["input"]["1160"]
+        out_sgst = d["output"]["2120"] - d["input"]["1170"]
+        total_out_cgst = d["output"]["2110"]
+        total_out_sgst = d["output"]["2120"]
+        total_in_cgst = d["input"]["1160"]
+        total_in_sgst = d["input"]["1170"]
+        net_cgst = out_cgst
+        net_sgst = out_sgst
+        out.append({
+            "date": date_str,
+            "output_cgst": str(total_out_cgst),
+            "output_sgst": str(total_out_sgst),
+            "input_cgst": str(total_in_cgst),
+            "input_sgst": str(total_in_sgst),
+            "net_cgst": str(net_cgst),
+            "net_sgst": str(net_sgst),
+        })
+    # Aggregate across the whole period
+    if out:
+        grand = out[0]
+        for row in out[1:]:
+            grand["output_cgst"] = Decimal(grand["output_cgst"]) + Decimal(row["output_cgst"])
+            grand["output_sgst"] = Decimal(grand["output_sgst"]) + Decimal(row["output_sgst"])
+            grand["input_cgst"] = Decimal(grand["input_cgst"]) + Decimal(row["input_cgst"])
+            grand["input_sgst"] = Decimal(grand["input_sgst"]) + Decimal(row["input_sgst"])
+            grand["net_cgst"] = Decimal(grand["net_cgst"]) + Decimal(row["net_cgst"])
+            grand["net_sgst"] = Decimal(grand["net_sgst"]) + Decimal(row["net_sgst"])
+        grand = {
+            "output_cgst": str(grand["output_cgst"]),
+            "output_sgst": str(grand["output_sgst"]),
+            "input_cgst": str(grand["input_cgst"]),
+            "input_sgst": str(grand["input_sgst"]),
+            "net_cgst": str(grand["net_cgst"]),
+            "net_sgst": str(grand["net_sgst"]),
+        }
+    else:
+        grand = {
+            "output_cgst": "0",
+            "output_sgst": "0",
+            "input_cgst": "0",
+            "input_sgst": "0",
+            "net_cgst": "0",
+            "net_sgst": "0",
+        }
+    return {"period_from": from_date, "period_to": to_date, "summary": out, "grand_total": grand}
 
 
 def general_ledger(

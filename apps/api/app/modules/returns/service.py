@@ -110,6 +110,197 @@ def reject_return(session: Session, return_row: SalesReturn, actor_user_id: str 
     return return_row
 
 
+def cancel_order_with_refund(
+    session: Session, *, company_id: str, order_id: str, actor_user_id: str | None,
+    reason: str | None = None, cancel_reason: str | None = None,
+) -> dict:
+    """Cancel an order.
+
+    Unpaid → release stock reservations. Paid but not shipped → reverse the
+    revenue with a credit note, refund the captured amount through the original
+    provider (Razorpay or mock) and release the reservations. Shipped/delivered
+    orders cannot be cancelled; use a return instead.
+    """
+    from app.modules.sales import service as sales
+
+    order = sales.get_order(session, company_id, order_id)
+    if order.status == "cancelled":
+        raise BusinessRuleError("ALREADY_CANCELLED", "Order is already cancelled")
+    if order.status in ("shipped", "delivered"):
+        raise BusinessRuleError(
+            "ALREADY_SHIPPED", "A shipped or delivered order must go through returns"
+        )
+
+    if order.payment_state != "paid":
+        sales.cancel_order(session, order, actor_user_id, cancel_reason=cancel_reason)
+        return {"status": order.status, "payment_state": order.payment_state, "refund_payment_id": None, "credit_note_id": None}
+
+    invoice = session.get(CustomerInvoice, order.invoice_id) if order.invoice_id else None
+    if invoice is None or invoice.status != "posted":
+        raise BusinessRuleError("NO_INVOICE", "A paid order needs its posted invoice to be refunded")
+    invoice_lines = invoicing.get_invoice_lines(session, invoice.id)
+    credit_note = invoicing.create_credit_note(
+        session,
+        company_id=company_id,
+        actor_user_id=actor_user_id,
+        invoice_id=invoice.id,
+        lines=[
+            {
+                "invoice_line_id": line.id,
+                "qty": dec(line.qty),
+                "description": f"Cancellation {order.doc_number}",
+            }
+            for line in invoice_lines
+        ],
+        note_date=datetime.now(timezone.utc).date(),
+        reason=reason or f"Order {order.doc_number} cancelled",
+    )
+
+    original = session.scalar(
+        select(PaymentRecord)
+        .where(
+            PaymentRecord.order_id == order.id,
+            PaymentRecord.direction == "receipt",
+            PaymentRecord.status == "succeeded",
+        )
+        .order_by(PaymentRecord.occurred_at.desc())
+    )
+    refund = None
+    if original is not None:
+        refund = payments.provider_refund(
+            session,
+            company_id=company_id,
+            actor_user_id=actor_user_id,
+            original=original,
+            amount=dec(order.total),
+        )
+        refund.direction = "payment"
+        refund.notes = f"Refund of {original.provider_ref}"
+        session.flush()
+
+    for line in sales.get_order_lines(session, order.id):
+        if line.reserved_location_id is not None:
+            inventory.release_reservation(
+                session,
+                company_id=order.company_id,
+                product_id=line.product_id,
+                quantity=line.qty,
+                source_type="sales_order_cancel",
+                source_id=order.id,
+                actor_user_id=actor_user_id,
+            )
+            line.reserved_location_id = None
+
+    order.status = "cancelled"
+    order.payment_state = "refunded"
+    order.cancelled_at = datetime.now(timezone.utc)
+    order.cancel_reason = cancel_reason
+    session.flush()
+    return {
+        "status": order.status,
+        "payment_state": order.payment_state,
+        "refund_payment_id": refund.id if refund else None,
+        "credit_note_id": credit_note.id,
+    }
+
+
+def return_window_days(session: Session, company_id: str) -> int:
+    """The shop's return window in days (0 when the shop accepts returns always)."""
+    from app.modules.storefront.models import StorefrontSettings
+
+    row = session.scalar(
+        select(StorefrontSettings).where(StorefrontSettings.company_id == company_id)
+    )
+    return int(row.return_window_days or 0) if row is not None else 0
+
+
+def return_cutoff(session: Session, company_id: str, order) -> datetime | None:
+    """Last moment a return may be requested for this order (None = no limit)."""
+    from datetime import timedelta
+
+    window = return_window_days(session, company_id)
+    delivered_at = getattr(order, "delivered_at", None)
+    if window <= 0 or delivered_at is None:
+        return None
+    return delivered_at + timedelta(days=window)
+
+
+def request_order_return(
+    session: Session, *, company_id: str, order_id: str, actor_user_id: str | None,
+    lines: list[dict], notes: str | None = None,
+) -> SalesReturn:
+    """Shopper-facing return request against a delivered, paid order.
+
+    `lines` carry `product_id` + `qty` (the storefront does not know internal
+    order-line ids); each is mapped onto the order line for that product.
+    """
+    from app.modules.sales import service as sales
+
+    order = sales.get_order(session, company_id, order_id)
+    if order.payment_state != "paid":
+        raise BusinessRuleError("NOT_PAID", "Only paid orders can be returned")
+    if order.status != "delivered":
+        raise BusinessRuleError(
+            "NOT_DELIVERED", "Returns can be requested once the order is delivered"
+        )
+    cutoff = return_cutoff(session, company_id, order)
+    if cutoff is not None and datetime.now(timezone.utc) > cutoff:
+        raise BusinessRuleError(
+            "RETURN_WINDOW_EXPIRED",
+            f"Returns are accepted for {return_window_days(session, company_id)} days after delivery; "
+            f"this order's window closed on {cutoff.date().isoformat()}",
+        )
+    from app.modules.catalog.models import Product
+
+    order_lines = {line.product_id: line for line in sales.get_order_lines(session, order.id)}
+    default_location = _default_restock_location(session, company_id)
+    mapped: list[dict] = []
+    for item in lines:
+        order_line = order_lines.get(item.get("product_id"))
+        if order_line is None:
+            raise NotFoundError("Order line")
+        qty = dec(item.get("qty", 0))
+        if qty <= 0:
+            raise BusinessRuleError("BAD_QTY", "Return quantity must be > 0")
+        if qty > dec(order_line.qty):
+            raise BusinessRuleError(
+                "OVER_RETURN", f"Return quantity exceeds the ordered quantity for {order_line.sku_snapshot}"
+            )
+        product = session.get(Product, order_line.product_id)
+        # Services have no stock to put back; they are credited and refunded.
+        stockable = product is None or product.stock_type == "stock"
+        mapped.append(
+            {
+                "order_line_id": order_line.id,
+                "qty": qty,
+                "disposition": "resalable" if stockable else "quarantined",
+                "restock_location_id": (
+                    order_line.reserved_location_id or default_location
+                ) if stockable else None,
+            }
+        )
+    if not mapped:
+        raise BusinessRuleError("NO_LINES", "Choose at least one item to return")
+    return create_sales_return(
+        session,
+        company_id=company_id,
+        actor_user_id=actor_user_id,
+        order_id=order.id,
+        lines=mapped,
+        notes=notes,
+    )
+
+
+def _default_restock_location(session: Session, company_id: str) -> str | None:
+    """First bin in the company — what a shopper return goes back to by default."""
+    from app.modules.storage import service as storage
+
+    for location in storage.list_locations(session, company_id):
+        if location.location_type == "bin":
+            return location.id
+    return None
+
+
 def complete_return(
     session: Session, return_row: SalesReturn, *, actor_user_id: str | None, now: datetime | None = None
 ) -> SalesReturn:

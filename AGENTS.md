@@ -50,18 +50,13 @@ Frontend (run from `apps/web/`, or from root with `pnpm --filter erp-frontend <s
 ## Current state (verify before assuming these still hold)
 
 - Routing is file-based under `src/routes/` (see below), not the old `src/routes.tsx`.
-- **`pnpm build` fails (pre-existing, NOT caused by the Turborepo layout — verified by running
-  `pnpm build` on an untouched HEAD worktree): the TanStack router generator aborts with
-  `Conflicting configuration paths … "/"` between `src/routes/_admin.tsx` and
-  `src/routes/_shop/index.tsx`, so `routeTree.gen.ts` is never regenerated and `tsc -b` then
-  errors `src/routes/_admin.tsx(4,38): TS2345 "…/_admin" not assignable to keyof FileRoutesByPath`.
-  Fix the route conflict, then let vite regenerate `routeTree.gen.ts`.
-- `pnpm test` passes (**verified** through turbo): `vitest run` → 8 tests in
-  `src/hooks/use-list-state.test.ts`; `uv run pytest` → 114 tests.
-- Backend tests pass (114 tests, incl. `tests/test_payment_gateways.py`). `tests/conftest.py` builds the schema with
+- `pnpm build` passes (the old `_admin.tsx` vs `_shop/index.tsx` route conflict is gone — main deleted `_admin.tsx`).
+- `pnpm test` passes (**verified** through turbo): `vitest run` → 36 tests (5 files); `uv run pytest` → 168 tests.
+- Backend tests pass (168 tests, incl. `tests/test_payment_gateways.py` and `tests/test_storefront_payments.py`). `tests/conftest.py` builds the schema with
   `Base.metadata.create_all`, **not** Alembic, and overrides env vars before app import.
-- There are **11** Alembic revisions in `apps/api/migrations/versions/` (head:
-  `b3f7d21a9c04_payment_gateway_configs.py`); `649d352f339d` added `blamable`
+- Alembic head is the merge revision `c9e4a2f61b37_merge_monorepo_heads.py` (joins main's storefront chain,
+  the file library and `b3f7d21a9c04_payment_gateway_configs.py`, and drops main's superseded
+  `payment_gateways` table; `a337a5b704e8` is kept as a no-op so existing DBs stay consistent); `649d352f339d` added `blamable`
   to 25 tables.
 - `psycopg[binary]` is a dependency on **all platforms now** (the old
   `platform_system != 'Windows'` marker was removed), so Windows dev can target Postgres.

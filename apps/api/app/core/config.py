@@ -70,6 +70,12 @@ class Settings(BaseSettings):
 
     cookie_secure: bool | None = None  # None → secure when APP_ENV=prod
 
+    # ---- storefront order expiry (abandoned gateway checkouts) ----
+    # unpaid orders older than this are cancelled and their stock released
+    order_payment_timeout_minutes: int = 30
+    # how often the background sweeper runs; <= 0 disables it
+    order_expiry_sweep_seconds: int = 300
+
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"

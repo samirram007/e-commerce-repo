@@ -11,8 +11,9 @@ class CompanyCreateIn(BaseModel):
     base_currency: str = Field(default="INR", min_length=3, max_length=3)
     timezone: str = Field(default="UTC", max_length=64)
     locale: str = Field(default="en-IN", max_length=16)
-    address: str | None = None
+    address: str | None = None  # kept for backward compatibility
     tax_identifier: str | None = Field(default=None, max_length=64)
+    addresses: list[CompanyAddressIn] = []
 
 
 class CompanyUpdateIn(BaseModel):
@@ -20,11 +21,40 @@ class CompanyUpdateIn(BaseModel):
     legal_name: str | None = None
     timezone: str | None = None
     locale: str | None = None
-    address: str | None = None
+    address: str | None = None  # kept for backward compatibility
     tax_identifier: str | None = None
     allow_negative_stock: bool | None = None
     allow_guest_checkout: bool | None = None
     is_active: bool | None = None
+    storefront_slug: str | None = None
+    addresses: list[CompanyAddressIn] | None = None
+
+
+class CompanyAddressIn(BaseModel):
+    address_type: str = Field(min_length=1)
+    line1: str = Field(min_length=1)
+    line2: str | None = None
+    city: str = Field(min_length=1)
+    region: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    tax_identifier: str | None = None
+    is_default: bool = False
+
+
+class CompanyAddressOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    address_type: str
+    line1: str
+    line2: str | None = None
+    city: str
+    region: str | None = None
+    postal_code: str | None = None
+    country: str | None = None
+    tax_identifier: str | None = None
+    is_default: bool
 
 
 class CompanyOut(BaseModel):
@@ -36,11 +66,13 @@ class CompanyOut(BaseModel):
     base_currency: str
     timezone: str
     locale: str
-    address: str | None
+    # address: str | None  # kept for backward compatibility; use addresses list instead
     tax_identifier: str | None
     allow_negative_stock: bool
     allow_guest_checkout: bool
     is_active: bool
+    storefront_slug: str | None = None
+    addresses: list[CompanyAddressOut] = []
 
 
 class MemberCreateIn(BaseModel):

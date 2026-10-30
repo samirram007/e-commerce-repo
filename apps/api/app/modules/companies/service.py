@@ -22,6 +22,7 @@ def create_company(
     address: str | None = None,
     tax_identifier: str | None = None,
     owner_user_id: str,
+    addresses: list[CompanyAddressIn] | None = None,
 ) -> Company:
     from app.modules.accounting.service import create_default_chart
 
@@ -43,6 +44,23 @@ def create_company(
     )
     session.add(company)
     session.flush()
+    # Handle addresses if provided
+    if addresses:
+        for addr in addresses:
+            from app.modules.companies.models import CompanyAddress
+            company_address = CompanyAddress(
+                company_id=company.id,
+                address_type=addr.address_type,
+                line1=addr.line1,
+                line2=addr.line2,
+                city=addr.city,
+                region=addr.region,
+                postal_code=addr.postal_code,
+                country=addr.country,
+                tax_identifier=addr.tax_identifier,
+                is_default=addr.is_default,
+            )
+            session.add(company_address)
     create_default_chart(session, company=company)
     membership = UserCompany(
         user_id=owner_user_id, company_id=company.id, is_company_admin=True, role_names="[]"
@@ -74,10 +92,57 @@ def get_company(session: Session, company_id: str) -> Company:
 
 
 def update_company(session: Session, company: Company, updates: dict) -> Company:
+    addresses = updates.pop("addresses", None)
     for field, value in updates.items():
         if value is not None:
             setattr(company, field, value)
     session.flush()
+    # Handle address updates
+    if addresses is not None:
+        # Remove existing addresses not in the new list
+        from app.modules.companies.models import CompanyAddress
+        existing = session.execute(
+            select(CompanyAddress).where(CompanyAddress.company_id == company.id)
+        ).scalars().all()
+        existing_ids = {a.id for a in existing}
+        new_ids = set()
+        for addr_data in addresses:
+            # Need to identify existing vs new; for now replace all
+            if addr_data.id and addr_data.id in existing_ids:
+                new_ids.add(addr_data.id)
+                # Update existing
+                existing_addr = session.get(CompanyAddress, addr_data.id)
+                if existing_addr:
+                    existing_addr.address_type = addr_data.address_type
+                    existing_addr.line1 = addr_data.line1
+                    existing_addr.line2 = addr_data.line2
+                    existing_addr.city = addr_data.city
+                    existing_addr.region = addr_data.region
+                    existing_addr.postal_code = addr_data.postal_code
+                    existing_addr.country = addr_data.country
+                    existing_addr.tax_identifier = addr_data.tax_identifier
+                    existing_addr.is_default = addr_data.is_default
+            else:
+                # New address - add it
+                new_addr = CompanyAddress(
+                    company_id=company.id,
+                    address_type=addr_data.address_type,
+                    line1=addr_data.line1,
+                    line2=addr_data.line2,
+                    city=addr_data.city,
+                    region=addr_data.region,
+                    postal_code=addr_data.postal_code,
+                    country=addr_data.country,
+                    tax_identifier=addr_data.tax_identifier,
+                    is_default=addr_data.is_default,
+                )
+                session.add(new_addr)
+                new_ids.add(new_addr.id)
+        # Delete addresses not in the new list
+        for addr in existing:
+            if addr.id not in new_ids:
+                session.delete(addr)
+        session.flush()
     return company
 
 

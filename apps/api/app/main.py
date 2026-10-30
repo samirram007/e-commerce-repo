@@ -1,4 +1,5 @@
 """FastAPI application entry point."""
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,30 @@ from app.api.v1.router import api_router as v1_router
 from app.core.config import get_settings
 
 
+def _expire_orders_once() -> int:
+    """One sweeper pass: cancel abandoned gateway checkouts and commit."""
+    from app.db.session import get_session_factory
+    from app.modules.sales import service as sales
+
+    with get_session_factory()() as session:
+        expired = sales.expire_unpaid_orders(session)
+        session.commit()
+        return expired
+
+
+async def _sweep_unpaid_orders(interval_seconds: int) -> None:
+    """Background loop: release stock held by unpaid storefront orders."""
+    log = logging.getLogger("erp.orders")
+    while True:
+        await asyncio.sleep(max(interval_seconds, 30))
+        try:
+            expired = await asyncio.to_thread(_expire_orders_once)
+            if expired:
+                log.info("expired unpaid storefront orders", extra={"count": expired})
+        except Exception:  # a failed sweep must not kill the loop
+            log.exception("order expiry sweep failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -16,7 +41,12 @@ async def lifespan(app: FastAPI):
     from app.shared.cache import init_cache
 
     init_cache()
+    sweeper = None
+    if settings.order_payment_timeout_minutes > 0 and settings.order_expiry_sweep_seconds > 0:
+        sweeper = asyncio.create_task(_sweep_unpaid_orders(settings.order_expiry_sweep_seconds))
     yield
+    if sweeper is not None:
+        sweeper.cancel()
     logging.getLogger("erp").info("shutdown")
 
 

@@ -301,10 +301,9 @@ def provider_refund(
     original_refunded = session.execute(
         select(func.sum(PaymentRecord.amount)).where(
             PaymentRecord.company_id == original.company_id,
-            (
-                (PaymentRecord.provider_ref == f"refund_{original.provider_ref}")
-                | (PaymentRecord.notes == f"Refund of {original.provider_ref}")
-            ),
+            PaymentRecord.provider == original.provider,
+            PaymentRecord.direction.in_(["payment", "receipt"]),
+            PaymentRecord.notes == f"Refund of {original.provider_ref}",
             PaymentRecord.status.in_(["succeeded", "pending"]),
         )
     ).scalar() or Decimal("0")

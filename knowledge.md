@@ -1,28 +1,29 @@
 # Knowledge Base
 
 ## Project Overview
-**Freebuff** – a full-stack ERP platform for e-commerce, inventory, delivery and accounting.
-- **Backend**: FastAPI + SQLAlchemy 2.x + Alembic, Python 3.15, managed by `uv`.
-- **Frontend**: React 18 + strict TypeScript + Vite, TanStack Router/Query, Axios.
+Full-stack ERP for e-commerce, inventory, delivery and accounting, plus a **public customer storefront** (`/shop/*`) that guests can browse and check out from.
+- **Backend**: FastAPI + Pydantic v2 + SQLAlchemy 2.x + Alembic, Python 3.15, managed by `uv`.
+- **Frontend**: React 19 + strict TypeScript + Vite 8, TanStack Router (file-based) & Query, Axios, Tailwind 4, zod.
 - **Monorepo**: Turborepo + pnpm workspace — `apps/api/` (backend, npm package `erp-backend`) and `apps/web/` (frontend, `erp-frontend`), orchestrated by root `turbo.json` (`build`, `dev`, `test`, `migrate`).
 
 ## Key Code Locations
 | Area | Path |
 |---|---|
 | Backend app | `apps/api/app/` |
-| API routers | `apps/api/app/api/v1/router.py` (aggregates all) |
-| Modules | `apps/api/app/modules/<name>/` – each has `router.py`, `service.py`, `models.py` (and `schemas.py` as needed) |
-| Services & repositories | `apps/api/app/modules/*/service.py` – **never commit**; the `get_db` dependency owns the single commit per request |
-| Models | `apps/api/app/db/models.py` + `apps/api/app/db/base_all.py` (new models must be imported here) |
-| DB / Migrations | `apps/api/migrations/` (Alembic); two revisions: initial schema + `blamable` columns |
-| Shared utilities | `apps/api/app/shared/money.py` (`money`/`qty`/`dec`), `apps/api/app/shared/numbering.py` (`allocate_number`), `apps/api/app/shared/idempotency.py` (`run_idempotent`) |
-| Exceptions | `apps/api/app/core/exceptions.py` – use `AppError` subclasses, not `HTTPException` |
-| Permissions | `apps/api/app/core/permissions.py` – catalog of permissions; enforce via `Depends(guard("<permission>"))` |
-| Companies / vendors | Customers **and** vendors live in `partners`; storefront/sales is `sales` served at `/storefront`; shipments are `fulfillment` served at `/shipments` |
-| Payroll | `apps/api/app/modules/payroll/` — `Employee`, `PayrollRun`, `Payslip` models; runs post one balanced GL entry (debit `6100` salaries expense, credit `2400` payroll payable + `2410` withholdings) via `accounting.post_journal_entry` with `source_type="payroll_run"`; routes at `/api/v1/payroll/…`; perms `payroll.manage` / `payroll.view` |
-| Frontend | `apps/web/src/` – file-based routes in `src/routes/` (`_guest`/`_protected` layouts); feature modules in `src/features/<module>/`; auth in `src/auth/auth-context.tsx`; API client `src/lib/api-client.ts` (+ `src/lib/error-handling.ts`); query client `src/lib/query-client.ts` |
-| Frontend base CRUD | `src/hooks/use-list-state.ts` (`useListState` + pure `toListParams`/`toggleSort`/`listQueryKey`); `src/components/data-table.tsx` (`ServerDataTable` — sortable headers, debounced search, filters/actions slots, pagination footer); `src/components/crud-form.tsx` (`useCrudForm` + `CrudFormModal`, zod-validated); reference consumer `src/features/payroll/EmployeesPage.tsx` |
-| Tests | `apps/api/tests/` – 94 tests (run all of them with root `pnpm test`); SQLite via `conftest.py` (does **not** enforce VARCHAR length, so Postgres-only bugs slip through) |
+| API aggregation | `apps/api/app/api/v1/router.py` (mounted at `/api/v1`) |
+| Modules | `apps/api/app/modules/<name>/` – `router.py`, `service.py`, `models.py` (+ `schemas.py` as needed) |
+| Base classes / mixins | `apps/api/app/db/base.py` (`CreatedByMixin` with `blamable`); all models registered in `apps/api/app/db/base_all.py` |
+| Migrations | `apps/api/migrations/` (Alembic; single head `c9e4a2f61b37`, the merge of the monorepo + main chains) |
+| Shared utilities | `app/shared/money.py` (`money`/`qty`/`dec`), `numbering.py` (`allocate_number`), `idempotency.py` (`run_idempotent`), `pagination.py` (`ListParams`/`apply_list`/`paginate`) |
+| Errors / permissions | `app/core/exceptions.py` (`AppError` subclasses), `app/core/permissions.py` (catalog) |
+| Public storefront API | `apps/api/app/modules/storefront/` – served at `/api/v1/storefront/shop/...`; guest identity = optional bearer user, `X-Anon-Id` and `X-Cart-Token` headers. `GET /products/{id}/image` is public (no headers) and serves a generated SVG tile; `GET /pincode/{pin}` validates Indian PIN codes (6 digits, non-zero first digit), resolves delivery rules (exact PIN first, else longest 2–5 digit prefix) and returns state/city/ETA/COD; `GET /cart` items carry server-priced `unit_price`/`tax_amount`/`line_total`. Payments: checkout / `POST /orders/{id}/pay` return a provider intent (`payment.client_payload`) and the browser confirms via `POST /orders/{id}/payment/confirm` (provider webhooks at `/api/v1/payments/webhooks/{provider}/{company_id}`), plus `POST /orders/{id}/cancel` (refund when paid) and `GET/POST /orders/{id}/returns`. Tax is shown as a GST breakup: `quote_cart(...)` and `GET /invoices/{id}` return `tax_breakup` (`[{rate, amount}]`, one row per GST rate, summing to `tax_total`), which the UI labels `GST 18% · CGST 9% + SGST 9%` |
+| Payroll | `app/modules/payroll/` – one balanced GL entry per posted run (`6100` debit, `2400`/`2410` credit) |
+| Frontend routes | `apps/web/src/routes/` – `_guest` (login), `_protected` (app shell), `shop` (public storefront), `$` catch-all |
+| Frontend features | `apps/web/src/features/<module>/` (`schemas.ts`, `api.ts`, `queries.ts`, `*Page.tsx`); storefront in `features/storefront/` |
+| Auth | `src/auth/auth-context.tsx` (`AuthProvider`, `useAuth`, non-React `ensureSession` for `beforeLoad`), `src/auth/guards.tsx`, `src/auth/session-store.ts` |
+| Transport / cache | `src/lib/api-client.ts` (Axios, `/api/v1`, bearer + `X-Company-Id`), `src/lib/error-handling.ts` (`ApiError`), `src/lib/query-client.ts` |
+| Tables & forms | `src/hooks/use-list-state.ts`, `src/components/data-table.tsx` (`ServerDataTable`), `src/components/crud-form.tsx`; every select is `SheetSelect` (`src/components/sheet.tsx`) |
+| Tests | `apps/api/tests/` (168 tests, SQLite); `apps/web/src/**/*.test.ts` (vitest, config `apps/web/vitest.config.ts`) |
 
 ## Commands
 **Root (Turborepo — run from the repo root):**
@@ -30,52 +31,59 @@
 - `pnpm dev` – `turbo run dev`: uvicorn `:8000` + Vite `:5173` together
 - `pnpm build` / `pnpm test` / `pnpm migrate` – `turbo run <task>` across `apps/*` (`--filter=erp-frontend` / `--filter=erp-backend` to scope)
 
-**Backend (run from `apps/api/`):**
-- `uv sync` – install dependencies
-- `uv run pytest` – run all tests (throwaway SQLite DB)
-- `uv run alembic upgrade head` – run migrations (reads `DATABASE_URL`)
-- `uv run uvicorn app.main:app --reload` – dev server at `:8000`
-- `uv run python -m app.seed` – idempotent seed (admin + demo company/chart/warehouse)
+**Backend (from `apps/api/`):**
+- `uv sync` – install deps (`.venv/` present)
+- `uv run pytest` – all tests on a throwaway **SQLite** DB (no Postgres/Redis needed)
+- `uv run pytest tests/test_accounting_invariants.py::test_unbalanced_journal_rejected` – single test
+- `uv run alembic upgrade head` – migrate (`DATABASE_URL`, `ALEMBIC_DATABASE_URL` overrides)
+- `uv run alembic revision --autogenerate -m "..."` – new revision
+- `uv run uvicorn app.main:app --reload` – dev server `:8000`
+- `uv run python -m app.seed` – idempotent seed (admin, demo company/COA/warehouse, employees, draft payroll)
 
-**Frontend (run from `apps/web/`) — pnpm only:**
-- `corepack enable` then `pnpm install` – install dependencies (npm/yarn are blocked by `scripts/ensure-pnpm.mjs`)
-- `pnpm dev` – Vite at `:5173`, proxies `/api` → `http://localhost:8000`
-- `pnpm build` – `vite build && tsc -b` (vite regenerates `routeTree.gen.ts`)
-- `pnpm test` – `vitest run` (config `apps/web/vitest.config.ts`; unit tests colocated as `src/**/*.test.ts`, e.g. `use-list-state.test.ts`)
+**Frontend (from `apps/web/`) — pnpm only** (npm/yarn blocked by `scripts/ensure-pnpm.mjs`; `packageManager` pins pnpm):
+- `corepack enable` once, then `pnpm install`
+- `pnpm dev` – Vite `:5173`, proxies `/api` → `VITE_API_PROXY ?? http://localhost:8000`
+- `pnpm build` – `vite build && tsc -b` (vite regenerates `routeTree.gen.ts`, then typechecks)
+- `pnpm test` – `vitest run`
 
-## Notable Conventions & Gotchas
-- **No floats**: always use `app/shared/money.py` (`money`/`qty`/`dec`).
-- **Idempotency**: `run_idempotent` keyed by `scope` + `Idempotency-Key`.
-- **Number allocation**: use `allocate_number` from `app/shared/numbering.py`.
-- **Company scoping**: the `X-Company-Id` header is resolved by `current_company_ctx`; enforce with `Depends(guard("<permission>"))`. The backend is authoritative — never trust client-supplied company id.
-- **Services/repositories must never commit**; `get_db` (`app/db/unit_of_work.py`) owns the single commit per request and rolls back on error.
-- **New models** must be imported in `app/db/base_all.py`, or Alembic autogenerate and the test `create_all` will not see it.
-- **Permissions catalog**: `app/core/permissions.py`. Use `Depends(guard("<permission>"))`.
-- **Route naming mismatches vs AGENT.md**: customers & vendors → `partners`; storefront/sales → `sales` at `/storefront`; shipments → `fulfillment` at `/shipments`.
-- **Frontend uses pnpm only** (npm/yarn blocked by `apps/web/scripts/ensure-pnpm.mjs`; `packageManager` pins pnpm). It typechecks and builds: `pnpm build` exits 0. Routes are file-based under `src/routes/`; every select uses `SheetSelect`.
-- **Local Postgres**: `psycopg[binary]` is installed on all platforms now (the Windows marker was removed). This machine uses the `postgresql-x64-18` Windows service (not docker-compose); `.env` points at `postgresql+psycopg://erp:...@localhost:5432/erp`. Percent-encode URL-reserved chars in the password (`@` → `%40`). If no `DATABASE_URL`, code defaults to `sqlite:///./erp_dev.db`.
-- **Alembic**: two revisions exist (`5d98e9df63ca_initial_schema.py`, `649d352f339d_add_blamable_to_created_by_mixin.py`); any new model requires import in `base_all.py` + new revision. `migrations/env.py` escapes `%` for ConfigParser.
-- **Payroll rules**: one run per company/period (cancelled runs free the period); posted runs cannot be cancelled (reverse the journal instead); totals are recomputed from payslips at post time; seed creates 3 demo employees + a draft run for the current month.
-- **Server-side list contract** (use for every CRUD list): backend `app/shared/pagination.py` — `ListParams` FastAPI dependency (`page`, `page_size`, `search`, `sort`, `order=asc|desc`) + `apply_list()` (search via OR-ed `ilike`, sort fields **allowlisted** — unknown → `INVALID_SORT_FIELD` 400) + `paginate()` → envelope `{items, total, page, page_size}`. Frontend: drive it with `useListState()` + `ServerDataTable`; include `listQueryKey(list)` in TanStack query keys and invalidate the feature root after mutations.
-- **Env vars**: `DATABASE_URL` for Alembic; `ALEMBIC_DATABASE_URL` to override. `.env.example` present.
-- **Docker**: `docker-compose.yml` brings up postgres 16, redis 7, `api`, `web`. The `web` service uses pnpm (`corepack enable && pnpm install --frozen-lockfile && pnpm run dev`). Note neither service has a `Dockerfile` yet, so `build:` fails as-is.
+No backend lint/format/typecheck tool is configured (`.ruff_cache`/`.mypy_cache` are only mentioned in `.gitignore`).
 
-## Quick Reference: Money & Numbers
-```python
-from app.shared.money import money, qty, dec
-# Never use float for monetary values.
-```
+## Routing & Auth Flow (frontend)
+- `__root.tsx` mounts `AuthProvider` + `ThemeProvider`; `<Outlet/>` renders the match.
+- `_guest.tsx` – unauthenticated screens; `beforeLoad` calls `ensureSession()` and redirects an already-signed-in visitor to `/`. Child `_guest/login.tsx` → URL `/login` and validates `?redirect=` (internal path only).
+- `_protected.tsx` – app shell (permission-filtered sidebar/topbar, company + fiscal-year pickers); `beforeLoad` restores the session or redirects to `/login`.
+- `shop.tsx` – public storefront shell (`StoreProvider` + `ShopLayout`); no auth required. Routes: `/shop/` (home = hero, category grid, then `ProductRail` panels: trending, new arrivals, budget picks, top departments), `/shop/products/` (filters via `?category=&q=&sort=`), `/shop/products/$productId`, `/shop/cart`, `/shop/checkout`, `/shop/interests`, `/shop/orders`.
+- `$.tsx` – unmatched URLs: guests go to `/shop`, signed-in users to `/` (never straight to the login screen).
+- Storefront guest identity lives in `features/storefront/store.ts` (localStorage `shop.cartToken`, `shop.anonId`, `shop.companyId`); `api.ts` attaches them plus the bearer token when signed in.
+- After sign-in, `LoginPage` navigates to `?redirect=` when it is a safe internal path, otherwise `/`.
+- `routeTree.gen.ts` is generated — never edit by hand.
 
-## Blamable (auto-audit)
-- **`blamable`** column added to `CreatedByMixin` in `apps/api/app/db/base.py` (line ~53).
-- A `Boolean` field defaulting to `False`; set to `True` to auto‑track that an acting user was responsible for the creation/modification event.
-- When `blamable=True` the `created_by` field is populated automatically by the service layer (e.g. `created_by=actor_user_id`) and the ORM records both the user ID and that the action was intentional/blamable.
-- Use it in any model that inherits `CreatedByMixin` — no extra code required beyond setting the flag.
-- Example:
-  ```python
-  from sqlalchemy.orm import Mapped
-  class MyModel(CreatedByMixin):
-      blamable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-  ```
-- To enable globally, ensure the service always passes `actor_user_id` when creating/updating records with `blamable=True`.
-```
+## Conventions & Gotchas
+- **Never use floats for money** — `app/shared/money.py`; monetary columns are `NUMERIC`.
+- **Services/repositories never commit**; `get_db` (`app/db/unit_of_work.py`) owns the single commit per request and rolls back on error.
+- **Company scoping**: `X-Company-Id` is resolved by `current_company_ctx`; enforce with `Depends(guard("<permission>"))`. Backend is authoritative.
+- **New models** must be imported in `app/db/base_all.py` or neither Alembic autogenerate nor the test `create_all` sees them.
+- Raise `AppError` subclasses (not `HTTPException`); error envelope `{"error": {"code", "message", "details"}}`.
+- **Server-side list contract**: backend `app/shared/pagination.py`; frontend drives it with `useListState()` + `ServerDataTable`, includes `listQueryKey(list)` in query keys, invalidates the feature root after mutations.
+- **Name/location mismatches**: customers & vendors live in `modules/partners`; storefront/sales is `modules/sales` (served at `/storefront` for the ERP API); shipments are `modules/fulfillment` at `/shipments`.
+- **Payroll rules**: one run per company/period (cancelled frees it); posted runs cannot be cancelled (reverse the journal); totals recomputed at post time.
+- **Blamable audit**: `CreatedByMixin.blamable` (bool, default false) marks creates/modifications as intentionally attributed to the acting user.
+- **Postgres vs SQLite**: SQLite tests do not enforce `VARCHAR` length or other dialect constraints — Postgres-only bugs will not show up in `uv run pytest`.
+- **Payments**: per-company gateways (Razorpay / Stripe / mock) are configured in Settings → Payment gateways (`payment_gateway_configs`, Fernet-encrypted secrets, separate test/live keys); see the payment gateway section of `AGENTS.md`. `RAZORPAY_*` env vars are no longer read. Checkout creates a pending `PaymentRecord` via the resolved adapter's `create_intent`; `/payment/confirm` or a signed webhook finalizes it through the shared `pay:{order_id}` idempotency key. Refunds go through `payments.provider_refund` with the original payment's mode.
+- **Cash on delivery**: a COD checkout calls `sales.accept_cash_on_delivery` — the order goes to `confirmed` (fulfillable) with an open `PaymentRecord` (`provider=cash`, `method=cod`, `provider_ref=<cod:order_id>`, `status=pending`) and no invoice. `fulfillment.transition_shipment(… "delivered")` calls `sales.collect_cash_on_delivery`, which settles that receipt, marks the order paid and issues/posts the invoice; cancelling before delivery voids the pending receipt. COD refunds (cancellations after payment, returns) go through `CashAdapter`.
+- **Seeding targets the demo company**: `python -m app.seed` looks for a company named `Demo Retail Co` (falling back to the admin's first company) so leftover test companies are not topped up. `store_info` resolves duplicate storefront slugs by oldest company. Demo pricing uses Indian GST slabs — `_seed_taxes` upserts `GST5`/`GST12`/`GST18` with 18% as the only default (sales and purchase) and retires the old `VAT10` "Sales VAT 10%" rate.
+- **Abandoned gateway checkouts**: `sales.expire_unpaid_orders` cancels `pending_payment` orders older than `ORDER_PAYMENT_TIMEOUT_MINUTES` (default 30), releasing reservations and voiding their open gateway intents; `confirmed` COD orders and paid orders are untouched. It runs before `GET /storefront/shop/orders` and from a background task in `app.main.lifespan` every `ORDER_EXPIRY_SWEEP_SECONDS` (default 300, 0 disables). A confirm/webhook arriving after expiry is rejected (`ORDER_NOT_PAYABLE`); late captures are not auto-refunded yet. Orders carry `cancel_reason` (`cancelled_by_customer | cancelled_by_staff | payment_timeout`, migration `73ca42fd5168`) which the storefront renders on the orders page.
+- **Printable GST invoice**: `InvoiceOut` adds `customer_address`, `customer_tax_identifier` and `tax_breakup[].taxable`; the ERP's `InvoicePrint` component (opened from the invoice sheet) renders seller GSTIN/address (from `GET /companies/{id}`), the buyer's address/GSTIN, taxable value and a CGST/SGST split per slab (`lib/format.splitTaxAmount` keeps the paise exact), then prints via `@media print` rules for `.invoice-print`. The buyer address is the invoice's `customer_address` snapshot: order-sourced invoices copy `order.billing_address or order.shipping_address`, manual invoices accept a `customer_address` on create. Demo seed sets the company's address/GSTIN and seeds a GST-registered customer `C-010` with a delivered demo order.
+- **HSN/SAC on invoices**: `products.hsn_sac` (validated 4–8 digits as `BAD_HSN_SAC`, editable in the product form) is snapshotted to `invoice_lines.hsn_sac_snapshot` when the invoice is created and returned as `InvoiceLineOut.hsn_sac`; `InvoicePrint` renders it as the HSN/SAC column. Migration `b7f3a91c4e20`. Demo products get a code per leaf category from `seed._HSN_BY_CATEGORY` (also backfilled onto products seeded earlier).
+
+- **HSN/SAC backfill**: a one-off `python -m app.backfill_hsn` (or `uv run python - <<'PY' ...`) iterates all posted invoices and sets `InvoiceLine.hsn_sac_snapshot` from the linked product's `hsn_sac` where the snapshot is currently null. Already run on the demo database: 34 of 38 posted invoices received a code; lines without a product link or a product without an HSN code are left as `null` (printed as `—` on the invoice).
+- **GST ledger split**: the default chart now has output `2110 CGST Payable` / `2120 SGST Payable` (roles `cgst_payable`/`sgst_payable`) and input credit `1160 Input CGST` / `1170 Input SGST` (roles `input_cgst`/`input_sgst`, both assets). Invoice posting credits the payable pair and credit notes debit it; vendor bills (from-receipt and ad-hoc) debit the input pair via `purchasing._input_tax_lines`. In every pair the SGST leg takes the rounding remainder so the entry balances, and `taxes.cgst_share` rounds CGST per GST slab so the ledger matches the printed invoice. `accounting.gst_payable_codes` / `gst_input_codes` fall back to the single `2100 Sales Tax Payable` for charts that predate the split.
+
+- **GST summary report**: `GET /api/v1/accounting/reports/gst-summary?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD` returns per-date totals of output CGST/SGST (2110/2120 credits) and input CGST/SGST (1160/1170 debits), with net per component (`net = output - input`). A positive net means GST payable; a negative net means input credit exceeds output. The response includes per-date rows and a grand total across the period.
+- **Local DB**: this machine uses the `postgresql-x64-18` Windows service (not docker-compose); percent-encode URL-reserved chars in the password (`@` → `%40`), and `migrations/env.py` escapes `%` for Alembic's ConfigParser. With no `DATABASE_URL` the default is `sqlite:///./erp_dev.db`. `psycopg[binary]` is a dependency on all platforms.
+- **Frontend**: strict TS; components never call Axios directly (use `api.ts` + `queries.ts` query options); clear sensitive caches on logout/company switch; company switch triggers a full `window.location.reload()`, so don't add reload effects that run on mount.
+- **Docker**: `docker-compose.yml` declares postgres 16, redis 7, `api`, `web`, but neither service has a `Dockerfile`, so `docker compose build` cannot succeed as-is. `VITE_API_URL` in compose is not read by the code (dev uses the Vite proxy).
+
+## Docs
+- `AGENT.md` — authoritative product/architecture spec (business rules, invariants, module expectations).
+- `AGENTS.md` — short operational notes for agents.

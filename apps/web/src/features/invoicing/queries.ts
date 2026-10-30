@@ -14,6 +14,7 @@ import {
   reverseInvoice,
   type InvoiceFilters,
 } from "./api";
+import { getCompany } from "../../services/identity";
 import type { CreditNotePayload, InvoicePayload } from "./schemas";
 
 export const invoicingKeys = {
@@ -86,6 +87,16 @@ export function locationsQueryOptions() {
   return queryOptions({
     queryKey: invoicingKeys.locations(),
     queryFn: fetchLocations,
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Seller profile (address + GSTIN) for a printable tax invoice. */
+export function invoiceCompanyQueryOptions(companyId: string | null) {
+  return queryOptions({
+    queryKey: [...invoicingKeys.all, "company", companyId ?? ""] as const,
+    queryFn: () => getCompany(companyId as string),
+    enabled: Boolean(companyId),
     staleTime: 5 * 60_000,
   });
 }

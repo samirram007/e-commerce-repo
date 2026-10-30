@@ -6,14 +6,15 @@ still requires a signed-in customer (existing /storefront/checkout).
 """
 from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, Header, Request, Response
+from fastapi import APIRouter, Depends, File, Form, Header, Request, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import AuthError, BusinessRuleError
+from app.core.exceptions import AuthError, BusinessRuleError, NotFoundError
 from app.core.security import decode_token
-from app.db.unit_of_work import get_db
+from app.db.unit_of_work import commit_before_reply, get_db
+from app.modules.catalog.models import Product
 from app.modules.storefront import service as svc
 from app.shared.files import open_file, open_public_file, StoredFile
 
@@ -110,6 +111,27 @@ def product_detail(
     session: Session = Depends(get_db),
 ):
     return svc.product_detail(session, ctx.company_id, product_id, count_view=count_view)
+
+
+@router.get(
+    "/products/{product_id}/image",
+    responses={200: {"content": {"image/svg+xml": {}}}},
+)
+def product_image(product_id: str, session: Session = Depends(get_db)):
+    """Product tile for `<img>` tags, so it must stay public and header-free.
+
+    Resolves the product by id alone (company scoping would require a header a
+    browser cannot attach to an image request) and serves the deterministic
+    generated tile. A real uploaded photo can take precedence here later.
+    """
+    product = session.get(Product, product_id)
+    if product is None or not product.is_active:
+        raise NotFoundError("Product image")
+    return Response(
+        content=svc.placeholder_image_svg(session, product),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/trending")
@@ -251,6 +273,31 @@ def guest_cart_remove(
     return svc.guest_cart_out(session, ctx.company_id, token)
 
 
+class CouponCodeIn(BaseModel):
+    code: str = Field(min_length=1, max_length=40)
+
+
+@router.post("/cart/coupon")
+def guest_cart_coupon(
+    payload: CouponCodeIn,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Apply a promo code to the guest cart (validated server-side)."""
+    return svc.apply_coupon(session, ctx.company_id, token, payload.code)
+
+
+@router.delete("/cart/coupon")
+def guest_cart_coupon_clear(
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Remove the applied code; the cart is quoted at full price again."""
+    return svc.clear_coupon(session, ctx.company_id, token)
+
+
 @router.delete("/cart")
 def guest_cart_clear(
     token: str = Depends(cart_token_header),
@@ -273,6 +320,53 @@ def serve_file(file_id: str, ctx: StoreCtx = Depends(store_ctx), session: Sessio
     private docs). Public storefront imagery goes through `/media/...` instead."""
     record, path = open_file(session, file_id, company_id=ctx.company_id)
     return FileResponse(path=path, media_type=record.content_type)
+
+
+# ---- shopper uploads (documents/photos the customer sends the store) ----
+@router.get("/uploads")
+def list_shopper_uploads(ctx: StoreCtx = Depends(store_ctx), session: Session = Depends(get_db)):
+    """Whether uploads are open, and what this shopper has already sent."""
+    return {
+        "enabled": svc.shopper_uploads_enabled(session, ctx.company_id),
+        "items": svc.shopper_upload_list(
+            session, company_id=ctx.company_id, user_id=ctx.user_id, anon_id=ctx.anon_id
+        ),
+    }
+
+
+@router.post("/uploads", status_code=201)
+def create_shopper_upload(
+    file: UploadFile,
+    order_id: str | None = Form(default=None),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Send a file to the store (colour proof, prescription, return photo...)."""
+    return svc.upload_shopper_file(
+        session,
+        company_id=ctx.company_id,
+        user_id=ctx.user_id,
+        anon_id=ctx.anon_id,
+        file=file,
+        order_id=order_id,
+    )
+
+
+@router.get("/uploads/{file_id}")
+def download_shopper_upload(
+    file_id: str,
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Download one of the shopper's own uploads (never anybody else's)."""
+    record, path, content_type = svc.shopper_file_contents(
+        session,
+        company_id=ctx.company_id,
+        user_id=ctx.user_id,
+        anon_id=ctx.anon_id,
+        file_id=file_id,
+    )
+    return FileResponse(path=path, media_type=content_type, filename=record.original_name)
 
 
 #: Storefront images are content-hashed by server-side key; cache hard.
@@ -306,6 +400,26 @@ def store_info(slug: str, session: Session = Depends(get_db)):
     return svc.store_info(session, slug)
 
 
+class ShopperRegisterIn(BaseModel):
+    """Public signup: the store is resolved by slug, the shopper gets no ERP roles."""
+
+    slug: str = Field(default="default", max_length=50)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    full_name: str = Field(default="", max_length=200)
+
+
+@router.post("/register", status_code=201)
+def register_shopper(payload: ShopperRegisterIn, session: Session = Depends(get_db)):
+    return svc.register_shopper(
+        session,
+        slug=payload.slug,
+        email=payload.email,
+        password=payload.password,
+        full_name=payload.full_name,
+    )
+
+
 @router.get("/payment-methods")
 def payment_methods(
     pincode: str | None = None,
@@ -313,6 +427,19 @@ def payment_methods(
     session: Session = Depends(get_db),
 ):
     return svc.payment_methods(session, ctx.company_id, pincode=pincode)
+
+
+@router.get("/shipping-options")
+def shipping_options(
+    pincode: str | None = None,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Delivery options the shop configured, priced for the current cart."""
+    return svc.shipping_options_for_cart(
+        session, company_id=ctx.company_id, cart_token=token, pincode=pincode
+    )
 
 
 # ---- shopper addresses ----
@@ -388,6 +515,7 @@ class CheckoutIn(BaseModel):
     address: CheckoutAddressIn = Field(default_factory=CheckoutAddressIn)
     payment_method: str = Field(default="card", max_length=20)
     shipping_total: str = Field(default="0", max_length=20)
+    shipping_carrier: str | None = Field(default=None, max_length=32)
     notes: str | None = Field(default=None, max_length=500)
 
 
@@ -399,13 +527,18 @@ def guest_checkout(
     ctx: StoreCtx = Depends(store_ctx),
     session: Session = Depends(get_db),
 ):
-    return svc.guest_checkout(
+    result = svc.guest_checkout(
         session,
         company_id=ctx.company_id,
         cart_token=token,
         payload=payload.model_dump(),
         idempotency_key=x_idempotency_key,
     )
+    # The browser confirms the payment against this row as soon as it has the
+    # reply (`POST /orders/{id}/payment/confirm`). Commit before replying so the
+    # follow-up can never hit a connection that does not see the order yet.
+    commit_before_reply(session)
+    return result
 
 
 @router.get("/orders")
@@ -467,4 +600,146 @@ def confirm_payment(
         cart_token=token,
         order_id=order_id,
         payload={k: v for k, v in payload.model_dump().items() if v is not None},
+    )
+
+
+# ---- cancellation & returns ----
+@router.post("/orders/{order_id}/cancel")
+def guest_cancel_order(
+    order_id: str,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Cancel an order: release stock (unpaid) or refund the captured payment."""
+    return svc.guest_cancel_order(
+        session, company_id=ctx.company_id, cart_token=token, order_id=order_id
+    )
+
+
+class ReturnLineIn(BaseModel):
+    product_id: str
+    qty: Decimal = Field(gt=0)
+
+
+class ReturnIn(BaseModel):
+    lines: list[ReturnLineIn]
+    notes: str | None = Field(default=None, max_length=500)
+
+
+# ---- purchase feedback ----
+class ReviewIn(BaseModel):
+    product_id: str = Field(min_length=1, max_length=36)
+    rating: int = Field(ge=1, le=5)
+    title: str | None = Field(default=None, max_length=120)
+    body: str | None = Field(default=None, max_length=4000)
+
+
+class OrderFeedbackIn(BaseModel):
+    delivery_rating: int | None = Field(default=None, ge=1, le=5)
+    packaging_rating: int | None = Field(default=None, ge=1, le=5)
+    service_rating: int | None = Field(default=None, ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+def _shopper_owner(ctx: StoreCtx) -> str | None:
+    """Identity of the shopper writing feedback, when we know it."""
+    if not ctx.user_id and not ctx.anon_id:
+        return None
+    return svc.owner_key(ctx.user_id, ctx.anon_id)
+
+
+@router.get("/orders/{order_id}/feedback")
+def order_feedback(
+    order_id: str,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """What may still be reviewed on this order, plus what was already sent."""
+    return svc.order_feedback_state(session, company_id=ctx.company_id, cart_token=token, order_id=order_id)
+
+
+@router.post("/orders/{order_id}/reviews", status_code=201)
+def create_review(
+    order_id: str,
+    payload: ReviewIn,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Review one purchased item (published once the store approves it)."""
+    return svc.submit_product_review(
+        session,
+        company_id=ctx.company_id,
+        cart_token=token,
+        order_id=order_id,
+        product_id=payload.product_id,
+        rating=payload.rating,
+        title=payload.title,
+        body=payload.body,
+        owner=_shopper_owner(ctx),
+    )
+
+
+@router.post("/orders/{order_id}/feedback", status_code=201)
+def create_order_feedback(
+    order_id: str,
+    payload: OrderFeedbackIn,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Rate the delivery, the packaging and the service for this order."""
+    return svc.submit_order_experience(
+        session,
+        company_id=ctx.company_id,
+        cart_token=token,
+        order_id=order_id,
+        delivery_rating=payload.delivery_rating,
+        packaging_rating=payload.packaging_rating,
+        service_rating=payload.service_rating,
+        comment=payload.comment,
+        owner=_shopper_owner(ctx),
+    )
+
+
+@router.get("/products/{product_id}/reviews")
+def product_reviews(
+    product_id: str,
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Published reviews and the star summary for one product."""
+    return svc.product_reviews(session, ctx.company_id, product_id)
+
+
+@router.get("/orders/{order_id}/returns")
+def guest_order_returns(
+    order_id: str,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    return svc.guest_order_returns(
+        session, company_id=ctx.company_id, cart_token=token, order_id=order_id
+    )
+
+
+@router.post("/orders/{order_id}/returns", status_code=201)
+def guest_request_return(
+    order_id: str,
+    payload: ReturnIn,
+    token: str = Depends(cart_token_header),
+    ctx: StoreCtx = Depends(store_ctx),
+    session: Session = Depends(get_db),
+):
+    """Request a return for a delivered order (ERP approves and completes it)."""
+    return svc.guest_request_return(
+        session,
+        company_id=ctx.company_id,
+        cart_token=token,
+        order_id=order_id,
+        lines=[line.model_dump() for line in payload.lines],
+        notes=payload.notes,
     )

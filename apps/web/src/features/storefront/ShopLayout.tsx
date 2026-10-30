@@ -1,269 +1,197 @@
-/** Public storefront chrome: announcement bar, sticky header, footer and toasts. */
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Heart, Mail, MapPin, Menu, Phone, Search, ShoppingBag, User, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  CircleHelp,
+  Heart,
+  House,
+  Info,
+  LayoutDashboard,
+  LayoutGrid,
+  LogIn,
+  Mail,
+  Package,
+  Percent,
+  Search,
+  ShoppingBag,
+  ShoppingCart,
+  UserPlus,
+  X,
+} from "lucide-react";
+import { EmptyState, Spinner } from "../../components/ui";
+import { useStore } from "./store-context";
 import { useAuth } from "../../auth/auth-context";
-import { CATEGORIES } from "./demo-catalog";
-import { ShopProvider, useShop } from "./shop-state";
-import "./shop.css";
+import { cartQueryOptions } from "./queries";
+import { shopSignInHref } from "./routing";
 
-const NAV = [
-  { to: "/", label: "Home" },
-  { to: "/shop", label: "Shop" },
-  { to: "/categories", label: "Categories" },
-  { to: "/deals", label: "Deals" },
-  { to: "/about", label: "About" },
-  { to: "/contact", label: "Contact" },
+/**
+ * Every topbar menu entry, in order — all of them share the same icon+label
+ * style, so browsing, account and content pages read as one menu.
+ */
+const MENU = [
+  { to: "/", label: "Home", icon: House },
+  { to: "/shop", label: "Products", icon: ShoppingBag },
+  { to: "/shop/wishlist", label: "Wishlist", icon: Heart },
+  { to: "/shop/orders", label: "Orders", icon: Package },
+  { to: "/categories", label: "Categories", icon: LayoutGrid },
+  { to: "/deals", label: "Deals", icon: Percent },
+  { to: "/about", label: "About", icon: Info },
+  { to: "/contact", label: "Contact", icon: Mail },
+  { to: "/faq", label: "Help", icon: CircleHelp },
 ] as const;
 
-const ANNOUNCEMENTS = [
-  "Free shipping on orders above ₹999",
-  "Easy 15-day returns",
-  "Festive sale — up to 30% off electronics",
-  "Cash on delivery available",
-  "New arrivals every Friday",
-];
-
-function AnnouncementBar() {
-  // Duplicated list so the marquee loops seamlessly.
-  const items = [...ANNOUNCEMENTS, ...ANNOUNCEMENTS];
-  return (
-    <div className="announce" aria-label="Store announcements">
-      <div className="announce-track">
-        {items.map((text, i) => (
-          <span key={i} aria-hidden={i >= ANNOUNCEMENTS.length}>
-            {text}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HeaderSearch({ onDone }: { onDone?: () => void }) {
+export function ShopLayout() {
+  const { store, loading, error } = useStore();
+  const cart = useQuery({ ...cartQueryOptions(), enabled: !loading && !!store });
+  const cartCount =
+    cart.data?.items?.reduce((sum, item) => sum + Number(item.qty || 0), 0) ?? 0;
+  const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
-  const [q, setQ] = useState("");
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    void navigate({ to: "/shop", search: { q: q.trim() || undefined } });
-    onDone?.();
-  }
+  // Current shop URL (path + search), used to return here after signing in.
+  const locationHref = useRouterState({ select: (state) => state.location.href });
+  const signInHref = shopSignInHref(locationHref);
 
-  return (
-    <form className="header-search" onSubmit={submit} role="search">
-      <Search aria-hidden />
-      <input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search products…" aria-label="Search products" />
-    </form>
-  );
-}
-
-function CountBadge({ count }: { count: number }) {
-  if (count === 0) return null;
-  // Keyed on the count so the bump animation replays on every change.
-  return (
-    <span className="count-badge" key={count}>
-      {count}
-    </span>
-  );
-}
-
-function Header() {
-  const { cartCount, wishlist } = useShop();
-  const { isAuthenticated } = useAuth();
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [scrolled, setScrolled] = useState(false);
-
+  // `⌘K` / `Ctrl+K` jumps to the search box from anywhere in the shop.
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+      if (event.key === "Escape" && document.activeElement === searchRef.current) {
+        searchRef.current?.blur();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname]);
-
-  const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
-
-  return (
-    <header className={`shop-header ${scrolled ? "scrolled" : ""}`}>
-      <div className="shop-container header-row">
-        <button type="button" className="icon-btn menu-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu">
-          <Menu aria-hidden />
-        </button>
-        <Link to="/" className="logo">
-          <span className="logo-mark">S</span>
-          <span>Shopora</span>
-        </Link>
-        <nav className="main-nav" aria-label="Main">
-          {NAV.map((item) => (
-            <Link key={item.to} to={item.to} className={isActive(item.to) ? "active" : ""}>
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <HeaderSearch />
-        <div className="header-actions">
-          <Link to={isAuthenticated ? "/dashboard" : "/login"} className="icon-btn" aria-label={isAuthenticated ? "Dashboard" : "Sign in"}>
-            <User aria-hidden />
-          </Link>
-          <Link to="/wishlist" className="icon-btn" aria-label={`Wishlist, ${wishlist.length} items`}>
-            <Heart aria-hidden />
-            <CountBadge count={wishlist.length} />
-          </Link>
-          <Link to="/cart" className="icon-btn" aria-label={`Bag, ${cartCount} items`}>
-            <ShoppingBag aria-hidden />
-            <CountBadge count={cartCount} />
-          </Link>
-        </div>
-      </div>
-
-      <div className={`drawer-backdrop ${menuOpen ? "open" : ""}`} onClick={() => setMenuOpen(false)} />
-      <aside className={`drawer ${menuOpen ? "open" : ""}`} aria-hidden={!menuOpen} aria-label="Menu">
-        <div className="drawer-head">
-          <span className="logo">
-            <span className="logo-mark">S</span>
-            <span>Shopora</span>
-          </span>
-          <button type="button" className="icon-btn" onClick={() => setMenuOpen(false)} aria-label="Close menu">
-            <X aria-hidden />
-          </button>
-        </div>
-        <HeaderSearch onDone={() => setMenuOpen(false)} />
-        <nav className="drawer-nav">
-          {NAV.map((item) => (
-            <Link key={item.to} to={item.to} className={isActive(item.to) ? "active" : ""}>
-              {item.label}
-            </Link>
-          ))}
-          <Link to="/wishlist">Wishlist</Link>
-          <Link to="/cart">Bag</Link>
-          <Link to="/faq">Help & FAQ</Link>
-        </nav>
-      </aside>
-    </header>
-  );
-}
-
-function Footer() {
-  const { notify } = useShop();
-  const [email, setEmail] = useState("");
-
-  function subscribe(event: FormEvent) {
+  function submitSearch(event: React.FormEvent) {
     event.preventDefault();
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      notify("Please enter a valid email address");
-      return;
-    }
-    setEmail("");
-    notify("Thanks for subscribing! Check your inbox for 10% off.");
+    const q = search.trim();
+    void navigate({ to: "/shop", search: q ? { q } : {} });
+  }
+
+  if (loading) {
+    return (
+      <div className="shop-shell">
+        <main className="shop-main">
+          <Spinner />
+        </main>
+      </div>
+    );
+  }
+  if (error || !store) {
+    return (
+      <div className="shop-shell">
+        <main className="shop-main">
+          <EmptyState title="Store unavailable" message="Could not resolve this storefront." />
+        </main>
+      </div>
+    );
   }
 
   return (
-    <footer className="shop-footer">
-      <div className="shop-container">
-        <div className="newsletter">
-          <div>
-            <h3>Get 10% off your first order</h3>
-            <p>Join the list for early access to drops, restocks and members-only deals.</p>
-          </div>
-          <form onSubmit={subscribe} className="newsletter-form">
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              aria-label="Email address"
-            />
-            <button type="submit" className="btn-primary">Subscribe</button>
-          </form>
-        </div>
+    <div className="shop-shell">
+      <header className="shop-header">
+        <div className="shop-header-inner">
+          <Link to="/" className="shop-brand">
+            {store.name}
+          </Link>
 
-        <div className="footer-grid">
-          <div>
-            <Link to="/" className="logo">
-              <span className="logo-mark">S</span>
-              <span>Shopora</span>
-            </Link>
-            <p className="footer-about">Thoughtfully chosen everyday essentials, delivered across India.</p>
-            <ul className="footer-contact">
-              <li><MapPin aria-hidden /> 42 Market Street, Bengaluru 560001</li>
-              <li><Phone aria-hidden /> +91 80 4000 1234</li>
-              <li><Mail aria-hidden /> hello@shopora.example</li>
-            </ul>
-          </div>
-          <div>
-            <h4>Shop</h4>
-            {CATEGORIES.map((category) => (
-              <Link key={category.slug} to="/shop" search={{ category: category.slug }}>
-                {category.name}
+          <nav className="shop-nav">
+            {MENU.map((item) => (
+              <Link
+                key={item.to}
+                to={item.to}
+                className="shop-nav-link"
+                activeProps={{ className: "active" }}
+              >
+                <item.icon size={24} aria-hidden />
+                <span>{item.label}</span>
               </Link>
             ))}
-          </div>
-          <div>
-            <h4>Help</h4>
-            <Link to="/faq">FAQ</Link>
-            <Link to="/policies/$slug" params={{ slug: "shipping" }}>Shipping</Link>
-            <Link to="/policies/$slug" params={{ slug: "returns" }}>Returns & refunds</Link>
-            <Link to="/contact">Contact us</Link>
-          </div>
-          <div>
-            <h4>Company</h4>
-            <Link to="/about">About us</Link>
-            <Link to="/policies/$slug" params={{ slug: "privacy" }}>Privacy policy</Link>
-            <Link to="/policies/$slug" params={{ slug: "terms" }}>Terms of service</Link>
-            <Link to="/login">Staff sign in</Link>
+            <Link to="/cart" className="shop-nav-link">
+              <ShoppingCart size={24} aria-hidden />
+              <span>Cart</span>
+              {cartCount > 0 ? <span className="shop-cart-badge">{cartCount}</span> : null}
+            </Link>
+          </nav>
+
+          <form className="shop-search" role="search" onSubmit={submitSearch}>
+            <Search size={18} aria-hidden />
+            <input
+              ref={searchRef}
+              type="search"
+              value={search}
+              aria-label="Search products"
+              placeholder="Search products…"
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {search ? (
+              <button type="button" aria-label="Clear search" onClick={() => setSearch("")}>
+                <X size={16} aria-hidden />
+              </button>
+            ) : (
+              <kbd className="shop-search-key">Ctrl K</kbd>
+            )}
+          </form>
+
+          <div className="shop-auth">
+            {isAuthenticated ? (
+              <>
+                <Link to="/dashboard" className="shop-auth-link">
+                  <LayoutDashboard size={24} aria-hidden />
+                  <span>Dashboard</span>
+                </Link>
+                <span className="shop-auth-divider" aria-hidden />
+                <span className="shop-auth-link shop-account">
+                  {store.currency}
+                  <button
+                    type="button"
+                    className="shop-signout"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      logout();
+                    }}
+                  >
+                    Sign out
+                  </button>
+                </span>
+              </>
+            ) : (
+              <>
+                <a href={signInHref} className="shop-auth-link">
+                  <LogIn size={24} aria-hidden />
+                  <span>Sign in</span>
+                </a>
+                <span className="shop-auth-divider" aria-hidden />
+                <a href="/register" className="shop-auth-link">
+                  <UserPlus size={24} aria-hidden />
+                  <span>Create account</span>
+                </a>
+              </>
+            )}
           </div>
         </div>
-        <div className="footer-bottom">
-          <span>© {new Date().getFullYear()} Shopora. All rights reserved.</span>
-          <span className="pay-chips">
-            <span>UPI</span><span>VISA</span><span>Mastercard</span><span>RuPay</span><span>COD</span>
+      </header>
+
+      <main className="shop-main">
+        <Outlet />
+      </main>
+
+      <footer className="shop-footer">
+        <div className="shop-footer-inner">
+          <span className="muted">
+            {store.name} · {store.currency}
           </span>
+          <span className="muted">Powered by ERP</span>
         </div>
-      </div>
-    </footer>
-  );
-}
-
-function Toasts() {
-  const { toasts } = useShop();
-  return (
-    <div className="toasts" role="status" aria-live="polite">
-      {toasts.map((toast) => (
-        <div key={toast.id} className="toast">
-          {toast.text}
-        </div>
-      ))}
+      </footer>
     </div>
-  );
-}
-
-/** Scrolls back to the top whenever the route path changes. */
-function ScrollToTop() {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
-  useEffect(() => {
-    window.scrollTo({ top: 0 });
-  }, [pathname]);
-  return null;
-}
-
-export function ShopLayout() {
-  return (
-    <ShopProvider>
-      <div className="shop">
-        <ScrollToTop />
-        <AnnouncementBar />
-        <Header />
-        <main className="shop-main">
-          <Outlet />
-        </main>
-        <Footer />
-        <Toasts />
-      </div>
-    </ShopProvider>
   );
 }

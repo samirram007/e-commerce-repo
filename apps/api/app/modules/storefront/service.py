@@ -3,8 +3,10 @@ interests (favorites/watchlist), delivery-zone (pincode) checks and the
 anonymous token cart — plus the public shop content (hero, testimonials,
 FAQ, policies, settings)."""
 import hashlib
+import re
 from datetime import date
 from decimal import ROUND_DOWN, Decimal
+from xml.sax.saxutils import escape as xml_escape
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -30,16 +32,18 @@ from app.modules.storefront.models import (
     StorefrontSettings,
     StorefrontTestimonial,
 )
-from app.shared.money import dec
+from app.shared.money import dec, money
 
 INTEREST_KINDS = {"favorite", "watchlist"}
 
-#: Payment methods the mock storefront gateway can offer.
+#: Storefront payment methods. Online ones (card/upi) are served by whichever
+#: gateway `payments.gateways.resolve_gateway` picks; COD stays offline.
 PAYMENT_METHODS = [
     {"code": "card", "label": "Credit / Debit card", "provider": "mock"},
     {"code": "upi", "label": "UPI", "provider": "mock"},
     {"code": "cod", "label": "Cash on delivery", "provider": "cash"},
 ]
+PAYMENT_METHOD_CODES = {method["code"] for method in PAYMENT_METHODS}
 
 #: Absolute-path prefix for the headerless public image route.
 MEDIA_PREFIX = "/api/v1/storefront/shop/media"
@@ -99,9 +103,16 @@ def _product_images(p: Product, session: Session, categories: dict | None = None
         "slug": p.slug,
         "stock_type": p.stock_type,
         "view_count": p.view_count,
-        "image_url": cover,
+        "image_url": cover or product_image_url(p.id),
         "images": images,
     }
+
+
+def product_image_url(product_id: str) -> str:
+    """Public URL of the product image. Serves the uploaded photo when the
+    product has one, otherwise a deterministic generated tile (see
+    `placeholder_image_svg`)."""
+    return f"/api/v1/storefront/shop/products/{product_id}/image"
 
 
 def _product_brief(p: Product, session: Session, categories: dict | None = None) -> dict:
@@ -143,14 +154,17 @@ def _category_out(session: Session, c: Category, counts: dict) -> dict:
         "tone": c.tone,
         "image_url": media_url(c.company_id, c.image_file_id),
         "parent_id": c.parent_id,
-        "product_count": counts.get(c.id, 0) + counts.get(None, 0) if c.parent_id is None else counts.get(c.id, 0),
+        "product_count": counts.get(c.id, 0),
         "sort_order": c.sort_order,
     }
 
 
 def _category_counts(session: Session, company_id: str) -> dict:
+    """Sellable+active product counts per category, rolled up through children
+    so a parent card matches what opening that category actually shows
+    (uncategorised products never leak into a card)."""
     counts: dict[str | None, int] = {}
-    for p in session.execute(
+    for category_id, count in session.execute(
         select(Product.category_id, func.count())
         .where(
             Product.company_id == company_id,
@@ -159,8 +173,26 @@ def _category_counts(session: Session, company_id: str) -> dict:
         )
         .group_by(Product.category_id)
     ).all():
-        counts[p[0]] = p[1]
-    return counts
+        counts[category_id] = count
+
+    children: dict[str, list[str]] = {}
+    category_ids: list[str] = []
+    for category_id, parent_id in session.execute(
+        select(Category.id, Category.parent_id).where(Category.company_id == company_id)
+    ).all():
+        category_ids.append(category_id)
+        if parent_id:
+            children.setdefault(parent_id, []).append(category_id)
+
+    def rollup(category_id: str, depth: int = 0) -> int:
+        total = counts.get(category_id, 0)
+        if depth > 10:  # defensive: category trees are small and shallow
+            return total
+        for child_id in children.get(category_id, []):
+            total += rollup(child_id, depth + 1)
+        return total
+
+    return {category_id: rollup(category_id) for category_id in category_ids}
 
 
 def list_categories(session: Session, company_id: str, *, slug: str | None = None) -> list[dict]:
@@ -272,12 +304,71 @@ def trending(session: Session, company_id: str, limit: int = 8) -> list[dict]:
     return [_product_brief(r, session, categories) for r in rows]
 
 
-def product_detail(session: Session, company_id: str, product_id: str, *, count_view: bool) -> dict:
+#: Emoji hint per category (lower-cased name) for the generated image tile.
+_CATEGORY_EMOJI = {
+    "phones": "\U0001f4f1",
+    "laptops": "\U0001f4bb",
+    "accessories": "\U0001f50c",
+    "apparel": "\U0001f455",
+    "home & kitchen": "\U0001f3e0",
+    "grocery": "\U0001f6d2",
+    "services": "\U0001f6e0\ufe0f",
+    "audio": "\U0001f3a7",
+    "wearables": "\u231a",
+    "cameras": "\U0001f4f7",
+    "tablets": "\U0001f4f2",
+    "sports & outdoors": "\U0001f3c0",
+    "fitness": "\U0001f3cb\ufe0f",
+    "cycling": "\U0001f6b2",
+    "beauty & personal care": "\U0001f9f4",
+    "skincare": "\U0001f9fc",
+    "toys & games": "\U0001f9f8",
+    "stationery": "\u270f\ufe0f",
+    "beverages": "\U0001f964",
+    "snacks": "\U0001f37f",
+}
+
+
+def _resolve_product(session: Session, company_id: str, product_id: str) -> Product:
     product = session.get(Product, product_id)
     if product is None or product.company_id != company_id:
         raise NotFoundError("Product")
+    return product
+
+
+def placeholder_image_svg(session: Session, product: Product) -> bytes:
+    """Deterministic product tile: hue seeded from the SKU, emoji from the
+    category, product name beneath. Keeps the catalog visual without external
+    image services; a real uploaded photo (image_file_id) takes precedence."""
+    hue = int(hashlib.sha256((product.sku or product.id).encode()).hexdigest(), 16) % 360
+    emoji = "\U0001f4e6"
+    if product.category_id:
+        category = session.get(Category, product.category_id)
+        if category is not None:
+            emoji = _CATEGORY_EMOJI.get(category.name.strip().lower(), emoji)
+    name = xml_escape(product.name[:38])
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 600 600">'
+        '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+        f'<stop offset="0" stop-color="hsl({hue}, 62%, 76%)"/>'
+        f'<stop offset="1" stop-color="hsl({(hue + 40) % 360}, 58%, 52%)"/>'
+        '</linearGradient></defs>'
+        '<rect width="600" height="600" fill="url(#g)"/>'
+        f'<text x="300" y="300" font-size="190" text-anchor="middle">{emoji}</text>'
+        f'<text x="300" y="430" font-size="30" text-anchor="middle" fill="rgba(255,255,255,0.95)" '
+        'font-family="system-ui, sans-serif">'
+        f'{name}</text>'
+        '</svg>'
+    )
+    return svg.encode("utf-8")
+
+
+def product_detail(session: Session, company_id: str, product_id: str, *, count_view: bool) -> dict:
+    product = _resolve_product(session, company_id, product_id)
     if count_view:
-        product.view_count += 1
+        # bump view count for analytics
+        product.view_count = (product.view_count or 0) + 1
+        session.add(product)
         session.flush()
     category = session.get(Category, product.category_id) if product.category_id else None
     related = session.execute(
@@ -383,29 +474,150 @@ def claim_anon_interests(session: Session, company_id: str, anon_id: str, user_i
     return moved
 
 
-# ---- pincode delivery ----
+# ---- pincode delivery (India) ----
+
+#: Indian PIN codes are six digits and never start with 0. The first two
+#: digits identify the postal circle, which maps onto a state/UT.
+_PINCODE_STATE_RANGES = [
+    (11, 11, "Delhi"),
+    (12, 13, "Haryana"),
+    (14, 16, "Punjab"),
+    (17, 17, "Himachal Pradesh"),
+    (18, 18, "Jammu & Kashmir"),
+    (19, 19, "Ladakh"),
+    (20, 28, "Uttar Pradesh / Uttarakhand"),
+    (30, 34, "Rajasthan"),
+    (36, 39, "Gujarat"),
+    (40, 44, "Maharashtra"),
+    (45, 48, "Madhya Pradesh"),
+    (49, 49, "Chhattisgarh"),
+    (50, 50, "Telangana"),
+    (51, 53, "Andhra Pradesh"),
+    (56, 59, "Karnataka"),
+    (60, 64, "Tamil Nadu"),
+    (67, 69, "Kerala"),
+    (70, 74, "West Bengal"),
+    (75, 77, "Odisha"),
+    (78, 78, "Assam"),
+    (79, 79, "North East"),
+    (80, 85, "Bihar / Jharkhand"),
+    (90, 99, "Army Postal Service"),
+]
+
+#: City/area hints for well-known sorting districts (first three digits).
+_PINCODE_CITY = {
+    "110": "New Delhi",
+    "122": "Gurugram",
+    "160": "Chandigarh",
+    "171": "Shimla",
+    "190": "Srinagar",
+    "201": "Noida",
+    "208": "Kanpur",
+    "211": "Prayagraj",
+    "221": "Varanasi",
+    "226": "Lucknow",
+    "248": "Dehradun",
+    "250": "Meerut",
+    "302": "Jaipur",
+    "380": "Ahmedabad",
+    "400": "Mumbai",
+    "403": "Panaji",
+    "411": "Pune",
+    "422": "Nashik",
+    "440": "Nagpur",
+    "462": "Bhopal",
+    "492": "Raipur",
+    "500": "Hyderabad",
+    "520": "Vijayawada",
+    "530": "Visakhapatnam",
+    "560": "Bengaluru",
+    "570": "Mysuru",
+    "600": "Chennai",
+    "641": "Coimbatore",
+    "673": "Kozhikode",
+    "682": "Kochi",
+    "695": "Thiruvananthapuram",
+    "700": "Kolkata",
+    "751": "Bhubaneswar",
+    "781": "Guwahati",
+    "800": "Patna",
+    "834": "Ranchi",
+}
+
+
+def normalize_pincode(value: str | None) -> str:
+    """Validate and normalise an Indian PIN code (spaces/dashes tolerated)."""
+    digits = re.sub(r"[\s-]", "", (value or "").strip())
+    if not re.fullmatch(r"[1-9]\d{5}", digits):
+        raise BusinessRuleError(
+            "BAD_PINCODE", "Enter a 6-digit Indian PIN code (it cannot start with 0)"
+        )
+    return digits
+
+
+def normalize_zone_code(value: str | None) -> str:
+    """A delivery rule covers either one PIN code (6 digits) or a prefix
+    (2–5 digits), e.g. `40` for all of Mumbai/Konkan."""
+    code = re.sub(r"[\s-]", "", (value or "").strip())
+    if not re.fullmatch(r"[1-9]\d{1,5}", code):
+        raise BusinessRuleError(
+            "BAD_ZONE", "A delivery zone must be a PIN code or a 2–5 digit prefix"
+        )
+    return code
+
+
+def _resolve_zone(session: Session, company_id: str, pincode: str) -> DeliveryZone | None:
+    """Most specific delivery rule for a PIN code: exact code, else the
+    longest matching prefix (so state-wide coverage needs one row, not 10⁵)."""
+    zones = session.execute(
+        select(DeliveryZone).where(DeliveryZone.company_id == company_id)
+    ).scalars().all()
+    exact = next((z for z in zones if z.pincode == pincode), None)
+    if exact is not None:
+        return exact
+    prefixes = [
+        z for z in zones if 2 <= len(z.pincode) < 6 and pincode.startswith(z.pincode)
+    ]
+    if not prefixes:
+        return None
+    return max(prefixes, key=lambda z: len(z.pincode))
+
+
+def _pincode_state(pincode: str) -> str | None:
+    circle = int(pincode[:2])
+    for low, high, state in _PINCODE_STATE_RANGES:
+        if low <= circle <= high:
+            return state
+    return None
+
+
 def check_pincode(session: Session, company_id: str, pincode: str) -> dict:
-    pincode = pincode.strip()
-    zone = session.scalar(
-        select(DeliveryZone).where(DeliveryZone.company_id == company_id, DeliveryZone.pincode == pincode)
-    )
+    """Resolve an Indian PIN code: region, deliverability, ETA and COD."""
+    pincode = normalize_pincode(pincode)
+    zone = _resolve_zone(session, company_id, pincode)
+    result = {
+        "pincode": pincode,
+        "valid": True,
+        "state": _pincode_state(pincode),
+        "city": _PINCODE_CITY.get(pincode[:3]),
+        "deliverable": False,
+        "eta_days": None,
+        "cod_allowed": False,
+        "configured": zone is not None,
+    }
     if zone is not None:
-        return {
-            "pincode": pincode,
-            "deliverable": zone.deliverable,
-            "eta_days": zone.eta_days,
-            "cod_allowed": zone.cod_allowed,
-            "configured": True,
-        }
-    return {"pincode": pincode, "deliverable": False, "eta_days": None, "cod_allowed": False, "configured": False}
+        result.update(
+            deliverable=zone.deliverable,
+            eta_days=zone.eta_days,
+            cod_allowed=zone.cod_allowed,
+        )
+    return result
 
 
 def set_delivery_zone(
     session: Session, company_id: str, *, pincode: str, deliverable: bool, eta_days: int, cod_allowed: bool
 ) -> DeliveryZone:
-    pincode = pincode.strip()
-    if not pincode:
-        raise BusinessRuleError("PINCODE_REQUIRED", "pincode is required")
+    pincode = normalize_zone_code(pincode)
     if eta_days < 1:
         raise BusinessRuleError("BAD_ETA", "eta_days must be >= 1")
     zone = session.scalar(
@@ -430,35 +642,71 @@ def token_cart(session: Session, company_id: str, token: str) -> Cart:
     )
 
 
-def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
+def apply_coupon(session: Session, company_id: str, token: str, code: str) -> dict:
+    """Apply a promo code to the cart, or explain why it cannot be used.
+
+    The cart is re-priced with the code in place (`strict_coupon`) before it is
+    stored, so an invalid code never sticks and the shopper sees the reason.
+    """
+    from app.modules.promotions import service as promotions
+
+    normalized = promotions.normalize_code(code)
+    if not normalized:
+        raise BusinessRuleError("COUPON_CODE_REQUIRED", "Enter a code")
     cart = token_cart(session, company_id, token)
-    items = sales_svc.cart_items(session, cart.id)
+    previous = cart.coupon_code
+    cart.coupon_code = normalized
+    try:
+        sales_svc.quote_cart(session, cart, strict_coupon=True)
+    except BusinessRuleError:
+        cart.coupon_code = previous
+        raise
+    session.flush()
+    return guest_cart_out(session, company_id, token)
+
+
+def clear_coupon(session: Session, company_id: str, token: str) -> dict:
+    """Drop the cart's promo code (the quote goes back to full price)."""
+    cart = token_cart(session, company_id, token)
+    cart.coupon_code = None
+    session.flush()
+    return guest_cart_out(session, company_id, token)
+
+
+def guest_cart_out(session: Session, company_id: str, token: str) -> dict:
+    """Cart payload for the storefront: product data plus the authoritative
+    per-line pricing from `quote_cart` so the UI never computes totals itself."""
+    cart = token_cart(session, company_id, token)
+    rows = sales_svc.cart_items(session, cart.id)
     products = {
         p.id: p
         for p in session.execute(
-            select(Product).where(Product.id.in_([i.product_id for i in items]))
+            select(Product).where(Product.id.in_([i.product_id for i in rows]))
         ).scalars().all()
-    } if items else {}
+    } if rows else {}
     quote = sales_svc.quote_cart(session, cart)
-    return {
-        "id": cart.id,
-        "status": cart.status,
-        "token": token,
-        "items": [
+    priced = {line["item_id"]: line for line in quote["lines"]}
+    items = []
+    for row in rows:
+        product = products.get(row.product_id)
+        line = priced.get(row.id, {})
+        unit_price = line.get("unit_price") or (str(product.base_price) if product else "0")
+        items.append(
             {
-                "id": i.id,
-                "product_id": i.product_id,
-                "qty": str(i.qty),
-                "name": products[i.product_id].name if i.product_id in products else "Item",
-                "sku": products[i.product_id].sku if i.product_id in products else "",
-                "price": str(products[i.product_id].base_price) if i.product_id in products else "0",
-                "image_url": media_url(company_id, products[i.product_id].image_file_id) if i.product_id in products else None,
-                "tone": products[i.product_id].tone if i.product_id in products else None,
+                "id": row.id,
+                "product_id": row.product_id,
+                "qty": str(row.qty),
+                "name": product.name if product else "Item",
+                "sku": product.sku if product else "",
+                "price": unit_price,
+                "unit_price": unit_price,
+                "tax_amount": line.get("tax_amount", "0"),
+                "line_total": line.get("line_total", "0"),
+                "stock_type": product.stock_type if product else "stock",
+                "image_url": product_image_url(product.id) if product else None,
             }
-            for i in items
-        ],
-        "quote": quote,
-    }
+        )
+    return {"id": cart.id, "status": cart.status, "token": token, "items": items, "quote": quote}
 
 
 # ---- public shop content (hero, testimonials, FAQ, policies, settings) ----
@@ -562,6 +810,7 @@ def settings_out(row: StorefrontSettings | None, company_id: str) -> dict:
         return {
             "free_shipping_threshold": None,
             "flat_shipping_fee": None,
+            "return_window_days": 7,
             "contact_phone": None,
             "contact_email": None,
             "contact_address": None,
@@ -575,6 +824,7 @@ def settings_out(row: StorefrontSettings | None, company_id: str) -> dict:
     return {
         "free_shipping_threshold": str(row.free_shipping_threshold) if row.free_shipping_threshold is not None else None,
         "flat_shipping_fee": str(row.flat_shipping_fee) if row.flat_shipping_fee is not None else None,
+        "return_window_days": row.return_window_days,
         "contact_phone": row.contact_phone,
         "contact_email": row.contact_email,
         "contact_address": row.contact_address,
@@ -664,12 +914,19 @@ def home(session: Session, company_id: str) -> dict:
 
 # ---- store info (public storefront bootstrap) ----
 def store_info(session: Session, slug: str) -> dict:
-    """Resolve a public storefront by its slug (no auth required)."""
+    """Resolve a public storefront by its slug (no auth required).
+
+    Leftover dev/test companies can share a slug, so pick the oldest match
+    instead of letting the database return an arbitrary row.
+    """
     company = session.scalar(
-        select(Company).where(
+        select(Company)
+        .where(
             Company.storefront_slug == slug.strip().lower(),
             Company.is_active.is_(True),
         )
+        .order_by(Company.created_at, Company.id)
+        .limit(1)
     )
     if company is None:
         raise NotFoundError("Store")
@@ -681,6 +938,170 @@ def store_info(session: Session, slug: str) -> dict:
         "allow_guest_checkout": company.allow_guest_checkout,
         "settings": settings_out(get_settings_row(session, company.id), company.id),
     }
+
+
+def register_shopper(
+    session: Session, *, slug: str, email: str, password: str, full_name: str
+) -> dict:
+    """Create a storefront shopper account for the store behind `slug`.
+
+    Shoppers are `users` like staff (email stays globally unique), but their
+    membership grants no ERP roles — the account only unlocks the shopper's own
+    cart, orders, wishlist and addresses. A customer record is created (or
+    linked) so their orders belong to a real customer of the store.
+    """
+    from app.modules.companies import service as companies_svc
+    from app.modules.identity import service as identity_svc
+
+    company_id = store_info(session, slug)["company_id"]
+    email = (email or "").strip().lower()
+    user = identity_svc.create_user(
+        session,
+        email=email,
+        password=password,
+        full_name=full_name,
+        is_platform_admin=False,
+    )
+    companies_svc.grant_membership(
+        session, company_id=company_id, user_id=user.id, is_company_admin=False, role_names=[]
+    )
+
+    customer = session.scalar(
+        select(Customer).where(
+            Customer.company_id == company_id, func.lower(Customer.email) == email
+        )
+    )
+    if customer is None:
+        customer = Customer(
+            company_id=company_id,
+            code=_customer_code(email),
+            name=full_name or email,
+            email=email,
+            user_id=user.id,
+            notes="Storefront account",
+        )
+        session.add(customer)
+    elif customer.user_id is None:
+        customer.user_id = user.id
+    session.flush()
+    return {"company_id": company_id, "email": user.email, "full_name": user.full_name}
+
+
+def shipping_options(
+    session: Session, company_id: str, *, pincode: str | None = None, subtotal=None, weight_kg=None
+) -> list[dict]:
+    """Delivery options at checkout: the carriers the admin enabled, priced.
+
+    Each enabled carrier is quoted through its adapter and falls back to the
+    shop's own delivery-zone rules (`app/modules/delivery/rates.py`). With no
+    carrier configured the shop's standard rule price is the only option, so a
+    fresh store still checks out.
+    """
+    from app.modules.delivery import profiles as carriers
+    from app.modules.delivery import rates
+
+    if subtotal is None:
+        subtotal = dec(0)
+    rule_price = compute_shipping(session, company_id, subtotal)
+    configured = carriers.enabled_carriers(session, company_id)
+    if not configured:
+        return [
+            {
+                "code": "standard",
+                "label": "Standard delivery",
+                "price": str(money(rule_price, 2)),
+                "rate_source": rates.SOURCE_RULES,
+                "carrier": None,
+            }
+        ]
+    out: list[dict] = []
+    for carrier in configured:
+        price, source = rates.price_for(
+            session,
+            company_id,
+            carrier,
+            rule_price=rule_price,
+            pincode=pincode,
+            subtotal=subtotal,
+            weight_kg=weight_kg,
+        )
+        out.append(
+            {
+                "code": carrier["code"],
+                "label": carrier["label"],
+                "price": str(money(price, 2)),
+                "rate_source": source,
+                "carrier": carrier["code"],
+            }
+        )
+    return out
+
+
+def _apply_shipping_choice(
+    session: Session, company_id: str, payload: dict, *, pincode: str, subtotal, fallback, weight_kg=None
+) -> tuple:
+    """Validate the carrier the shopper picked and return its price and note.
+
+    The carrier price is recomputed here, so a client cannot choose its own
+    delivery charge; an unknown or disabled carrier is rejected.
+    """
+    from app.modules.delivery import profiles as carriers
+
+    code = (payload.get("shipping_carrier") or "").strip()
+    if not code:
+        return fallback, None
+    option = next(
+        (
+            option
+            for option in shipping_options(
+                session, company_id, pincode=pincode or None, subtotal=subtotal, weight_kg=weight_kg
+            )
+            if option["code"] == code
+        ),
+        None,
+    )
+    if option is None or not carriers.enabled_carriers(session, company_id):
+        raise BusinessRuleError(
+            "SHIPPING_OPTION_UNAVAILABLE", f"Delivery option '{code}' is not available for this order"
+        )
+    return dec(option["price"]), f"Shipping: {option['label']}"
+
+
+def cart_weight_kg(session: Session, cart: Cart) -> Decimal:
+    """Parcel weight of a cart: the sum of each line's product weight × qty.
+
+    Carriers rate by weight, so a cart without weights simply weighs zero and
+    the rate falls back to the shop's rules.
+    """
+    total = dec(0)
+    for line in sales_svc.cart_items(session, cart.id):
+        product = session.get(Product, line.product_id)
+        if product is not None and product.weight_kg:
+            total += dec(product.weight_kg) * dec(line.qty)
+    return money(total, 3)
+
+
+def shipping_options_for_cart(
+    session: Session, *, company_id: str, cart_token: str, pincode: str | None = None
+) -> list[dict]:
+    """Delivery options priced for the shopper's current cart.
+
+    The cart subtotal decides rule-based pricing (free-shipping thresholds) and
+    the cart weight is what a carrier rates, so both are read server-side; an
+    empty or unknown cart just prices at zero.
+    """
+    from app.core.exceptions import AppError
+
+    subtotal, weight_kg = dec(0), dec(0)
+    try:
+        cart = token_cart(session, company_id, cart_token)
+        subtotal = dec(sales_svc.quote_cart(session, cart)["subtotal"])
+        weight_kg = cart_weight_kg(session, cart)
+    except AppError:
+        pass
+    return shipping_options(
+        session, company_id, pincode=pincode, subtotal=subtotal, weight_kg=weight_kg
+    )
 
 
 def payment_methods(session: Session, company_id: str, *, pincode: str | None = None) -> list[dict]:
@@ -695,12 +1116,8 @@ def payment_methods(session: Session, company_id: str, *, pincode: str | None = 
     from app.modules.payments.gateways import resolve_gateway
 
     zone = None
-    if pincode:
-        zone = session.scalar(
-            select(DeliveryZone).where(
-                DeliveryZone.company_id == company_id, DeliveryZone.pincode == pincode.strip()
-            )
-        )
+    if pincode and pincode.strip():
+        zone = _resolve_zone(session, company_id, normalize_pincode(pincode))
     out = []
     for method in PAYMENT_METHODS:
         if method["code"] == "cod":
@@ -805,6 +1222,12 @@ def delete_address(session: Session, company_id: str, owner: str, address_id: st
 
 
 # ---- guest checkout ----
+def _customer_code(email: str) -> str:
+    """Deterministic customer code so a web signup and a later guest checkout
+    with the same email converge on one customer record."""
+    return "WEB-" + hashlib.sha1(email.encode("utf-8")).hexdigest()[:10].upper()
+
+
 def _guest_customer(
     session: Session, company_id: str, *, name: str, email: str, phone: str | None
 ) -> Customer:
@@ -822,10 +1245,9 @@ def _guest_customer(
             existing.phone = phone
         session.flush()
         return existing
-    code = "WEB-" + hashlib.sha1(email.encode("utf-8")).hexdigest()[:10].upper()
     customer = Customer(
         company_id=company_id,
-        code=code,
+        code=_customer_code(email),
         name=name or email,
         email=email,
         phone=phone,
@@ -848,16 +1270,41 @@ def _format_address(address: dict) -> str:
     return ", ".join(part for part in parts if part)
 
 
+def _return_by(session: Session, order: SalesOrder) -> str | None:
+    """Last day a return may be requested (None when the shop sets no window)."""
+    from app.modules.returns.service import return_cutoff
+
+    cutoff = return_cutoff(session, order.company_id, order)
+    return cutoff.date().isoformat() if cutoff is not None else None
+
+
 def _order_out(session: Session, order: SalesOrder) -> dict:
+    from app.modules.payments.models import PaymentRecord
+
     lines = sales_svc.get_order_lines(session, order.id)
+    latest_payment = session.scalar(
+        select(PaymentRecord)
+        .where(PaymentRecord.order_id == order.id, PaymentRecord.direction == "receipt")
+        .order_by(PaymentRecord.occurred_at.desc())
+    )
     return {
         "id": order.id,
+        "payment_method": latest_payment.method if latest_payment else None,
+        "payment_status": latest_payment.status if latest_payment else None,
         "doc_number": order.doc_number,
         "status": order.status,
         "payment_state": order.payment_state,
+        "cancel_reason": order.cancel_reason,
+        "cancelled_at": order.cancelled_at.isoformat() if order.cancelled_at else None,
         "order_date": str(order.order_date),
+        # the return window runs from delivery; the shopper page shows the deadline
+        "delivered_at": order.delivered_at.isoformat() if order.delivered_at else None,
+        "return_by": _return_by(session, order),
+        "can_review": order.payment_state == "paid",
         "currency": order.currency,
         "subtotal": str(order.subtotal),
+        "discount_total": str(order.discount_total),
+        "coupon_code": order.coupon_code,
         "tax_total": str(order.tax_total),
         "shipping_total": str(order.shipping_total),
         "total": str(order.total),
@@ -894,26 +1341,28 @@ def guest_checkout(
         raise BusinessRuleError("EMPTY_CART", "Cart is empty")
 
     address = payload.get("address") or {}
-    pincode = (address.get("pincode") or "").strip()
+    raw_pincode = (address.get("pincode") or "").strip()
+    pincode = normalize_pincode(raw_pincode) if raw_pincode else ""
     zones = session.execute(
         select(func.count()).select_from(DeliveryZone).where(DeliveryZone.company_id == company_id)
     ).scalar_one()
-    zone = None
-    if pincode:
-        zone = session.scalar(
-            select(DeliveryZone).where(
-                DeliveryZone.company_id == company_id, DeliveryZone.pincode == pincode
-            )
-        )
+    zone = _resolve_zone(session, company_id, pincode) if pincode else None
+    if zones and not pincode:
+        raise BusinessRuleError("PINCODE_REQUIRED", "A delivery PIN code is required")
     if zones and (zone is None or not zone.deliverable):
         raise BusinessRuleError("NOT_DELIVERABLE", f"We do not deliver to {pincode}")
 
     method = (payload.get("payment_method") or "card").lower()
-    if method not in {m["code"] for m in PAYMENT_METHODS}:
+    if method not in PAYMENT_METHOD_CODES:
         raise BusinessRuleError("BAD_PAYMENT_METHOD", f"Unknown payment method '{method}'")
-    if method == "cod" and zone is not None and not zone.cod_allowed:
+    available = {
+        m["code"]
+        for m in payment_methods(session, company_id, pincode=pincode or None)
+        if m["available"]
+    }
+    if method not in available:
         raise BusinessRuleError(
-            "COD_NOT_AVAILABLE", "Cash on delivery is unavailable for this pincode"
+            "PAYMENT_METHOD_UNAVAILABLE", f"'{method}' is not available for this checkout"
         )
 
     customer = _guest_customer(
@@ -927,13 +1376,21 @@ def guest_checkout(
         raise BusinessRuleError("EMAIL_REQUIRED", "An email address is required to place the order")
 
     address_text = _format_address(address)
+    subtotal = sales_svc.quote_cart(session, cart)["subtotal"]
     if get_settings_row(session, company_id) is not None:
         # The store's shipping rules are authoritative; ignore any client value.
-        shipping_total = compute_shipping(
-            session, company_id, sales_svc.quote_cart(session, cart)["subtotal"]
-        )
+        shipping_total = compute_shipping(session, company_id, subtotal)
     else:
         shipping_total = dec(payload.get("shipping_total") or "0")
+    shipping_total, carrier_note = _apply_shipping_choice(
+        session,
+        company_id,
+        payload,
+        pincode=pincode,
+        subtotal=subtotal,
+        fallback=shipping_total,
+        weight_kg=cart_weight_kg(session, cart),
+    )
     order, replayed = sales_svc.checkout_cart(
         session,
         company_id=company_id,
@@ -943,15 +1400,21 @@ def guest_checkout(
         shipping_address=address_text,
         billing_address=address_text,
         shipping_total=shipping_total,
-        notes=payload.get("notes") or ("Cash on delivery" if method == "cod" else None),
+        notes=payload.get("notes") or carrier_note or ("Cash on delivery" if method == "cod" else None),
         idempotency_key=idempotency_key,
     )
     payment_state = order.payment_state
     payment_out = None
-    if method != "cod" and order.status == "pending_payment":
-        # Online methods no longer charge synchronously: create the provider
-        # intent and hand the browser everything it needs; the order is only
-        # marked paid after verify_client_payment or a webhook confirms it.
+    # COD confirms the order now and books an open cash receipt that the
+    # delivery step settles. Online methods no longer charge synchronously:
+    # create the provider intent and hand the browser everything it needs; the
+    # order is only marked paid after verify_client_payment or a webhook.
+    if method == "cod" and order.status == "pending_payment":
+        sales_svc.accept_cash_on_delivery(
+            session, company_id=company_id, order=order, actor_user_id=None
+        )
+        payment_state = order.payment_state
+    elif order.status == "pending_payment":
         payment_out = _start_payment(
             session, company_id=company_id, actor_user_id=None, order=order, method=method
         )
@@ -968,6 +1431,9 @@ def guest_checkout(
 
 def guest_orders(session: Session, company_id: str, cart_token: str) -> list[dict]:
     """Orders placed from this browser's cart token (continue purchase)."""
+    # Release stock held by abandoned gateway checkouts before listing, so a
+    # shopper never sees a stale "pending payment" order that can still be paid.
+    sales_svc.expire_unpaid_orders(session, company_id=company_id)
     cart_ids = session.execute(
         select(Cart.id).where(Cart.company_id == company_id, Cart.token == cart_token)
     ).scalars().all()
@@ -1098,3 +1564,243 @@ def confirm_payment(
             "status": record.status,
         },
     }
+
+
+# ---- shopper order access ----
+def _owned_order(session: Session, company_id: str, cart_token: str, order_id: str) -> SalesOrder:
+    """An order is only reachable through the cart token that placed it."""
+    order = session.get(SalesOrder, order_id)
+    if order is None or order.company_id != company_id:
+        raise NotFoundError("Sales order")
+    cart = session.get(Cart, order.cart_id) if order.cart_id else None
+    if cart is None or cart.token != cart_token:
+        raise BusinessRuleError("ORDER_NOT_OWNED", "This order belongs to another cart")
+    return order
+
+
+# ---- cancellation & returns ----
+def guest_cancel_order(
+    session: Session, *, company_id: str, cart_token: str, order_id: str
+) -> dict:
+    """Cancel an order: unpaid releases stock, paid refunds through the gateway."""
+    from app.modules.returns import service as returns_svc
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    result = returns_svc.cancel_order_with_refund(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        actor_user_id=None,
+        reason="Cancelled by the shopper",
+        cancel_reason="cancelled_by_customer",
+    )
+    return {**_order_out(session, order), **result, "cancelled": True}
+
+
+def _return_out(session: Session, row) -> dict:
+    from app.modules.returns import service as returns_svc
+
+    return {
+        "id": row.id,
+        "doc_number": row.doc_number,
+        "order_id": row.order_id,
+        "status": row.status,
+        "requested_at": row.requested_at.isoformat() if row.requested_at else None,
+        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+        "credit_note_id": row.credit_note_id,
+        "refund_payment_id": row.refund_payment_id,
+        "notes": row.notes,
+        "lines": [
+            {
+                "id": line.id,
+                "product_id": line.product_id,
+                "qty": str(line.qty),
+                "unit_price": str(line.unit_price),
+                "disposition": line.disposition,
+            }
+            for line in returns_svc.return_lines(session, row.id)
+        ],
+    }
+
+
+def guest_order_returns(
+    session: Session, company_id: str, cart_token: str, order_id: str
+) -> list[dict]:
+    from app.modules.returns.models import SalesReturn
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    rows = session.execute(
+        select(SalesReturn)
+        .where(SalesReturn.company_id == company_id, SalesReturn.order_id == order.id)
+        .order_by(SalesReturn.created_at.desc())
+    ).scalars().all()
+    return [_return_out(session, row) for row in rows]
+
+
+def guest_request_return(
+    session: Session, *, company_id: str, cart_token: str, order_id: str,
+    lines: list[dict], notes: str | None = None,
+) -> dict:
+    """Shopper return request (pending ERP approval/completion)."""
+    from app.modules.returns import service as returns_svc
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    row = returns_svc.request_order_return(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        actor_user_id=None,
+        lines=lines,
+        notes=notes,
+    )
+    return _return_out(session, row)
+
+
+# ---- purchase feedback (verified-purchase reviews + order experience) ----
+def submit_product_review(
+    session: Session, *, company_id: str, cart_token: str, order_id: str, product_id: str,
+    rating, title: str | None = None, body: str | None = None, owner: str | None = None,
+) -> dict:
+    """Review an item from an order the shopper owns (pending store approval)."""
+    from app.modules.feedback import service as feedback
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    review = feedback.submit_review(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        product_id=product_id,
+        rating=rating,
+        title=title,
+        body=body,
+        owner_key=owner,
+        customer_id=order.customer_id,
+    )
+    return {**feedback.review_out(review, shopper=True), "summary": feedback.summary(session, company_id, product_id)}
+
+
+def order_feedback_state(session: Session, *, company_id: str, cart_token: str, order_id: str) -> dict:
+    """What the shopper can still review on this order, and what they already did."""
+    from app.modules.feedback import service as feedback
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    row = feedback.order_feedback(session, company_id, order.id)
+    return {
+        "order_id": order.id,
+        "can_review": order.payment_state == "paid",
+        "items": feedback.reviewable_lines(session, order),
+        "reviews": [feedback.review_out(r, shopper=True) for r in feedback.order_reviews(session, company_id, order.id)],
+        "order_feedback": feedback.feedback_out(row) if row is not None else None,
+    }
+
+
+def submit_order_experience(
+    session: Session, *, company_id: str, cart_token: str, order_id: str,
+    delivery_rating=None, packaging_rating=None, service_rating=None, comment: str | None = None,
+    owner: str | None = None,
+) -> dict:
+    """Delivery / packaging / service feedback for one of the shopper's orders."""
+    from app.modules.feedback import service as feedback
+
+    order = _owned_order(session, company_id, cart_token, order_id)
+    row = feedback.submit_order_feedback(
+        session,
+        company_id=company_id,
+        order_id=order.id,
+        delivery_rating=delivery_rating,
+        packaging_rating=packaging_rating,
+        service_rating=service_rating,
+        comment=comment,
+        owner_key=owner,
+        customer_id=order.customer_id,
+    )
+    return feedback.feedback_out(row)
+
+
+def product_reviews(session: Session, company_id: str, product_id: str) -> dict:
+    """Published reviews for a product (approved only) with the rating summary."""
+    from app.modules.feedback import service as feedback
+
+    return {
+        "summary": feedback.summary(session, company_id, product_id),
+        "items": [
+            feedback.review_out(row, shopper=True)
+            for row in feedback.product_reviews(session, company_id, product_id)
+        ],
+    }
+
+
+# ---- shopper file uploads (colour proof, prescription, return photo...) ----
+def _shopper_file_out(record) -> dict:
+    return {
+        "id": record.id,
+        "name": record.original_name,
+        "content_type": record.content_type,
+        "size_bytes": record.size_bytes,
+        "order_id": record.order_id,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+
+def shopper_uploads_enabled(session: Session, company_id: str) -> bool:
+    """Whether the store's moderated inbox accepts customer uploads.
+
+    The store opts in by enabling uploads on the "Customer uploads" folder in
+    the ERP file library, so there is a single switch for the feature.
+    """
+    from app.modules.files.models import FileFolder
+
+    row = session.scalar(
+        select(FileFolder).where(
+            FileFolder.company_id == company_id,
+            FileFolder.system_key == "shopper_uploads",
+            FileFolder.deleted_at.is_(None),
+        )
+    )
+    return bool(row is not None and row.accepts_shopper_uploads)
+
+
+def upload_shopper_file(
+    session: Session, *, company_id: str, user_id: str | None, anon_id: str | None,
+    file, order_id: str | None = None,
+) -> dict:
+    """Attach a document or photo from the storefront to the customer's inbox."""
+    from app.modules.files import service as files_service
+
+    owner = owner_key(user_id, anon_id)
+    if order_id:
+        order = session.get(SalesOrder, order_id)
+        if order is None or order.company_id != company_id:
+            raise NotFoundError("Order")
+    record = files_service.shopper_upload(
+        session,
+        company_id=company_id,
+        owner=owner,
+        upload_file=file,
+        order_id=order_id,
+    )
+    return _shopper_file_out(record)
+
+
+def shopper_upload_list(
+    session: Session, *, company_id: str, user_id: str | None, anon_id: str | None
+) -> list[dict]:
+    """The files this shopper attached, newest first."""
+    from app.modules.files import service as files_service
+
+    owner = owner_key(user_id, anon_id)
+    return [_shopper_file_out(row) for row in files_service.shopper_files(session, company_id, owner)]
+
+
+def shopper_file_contents(
+    session: Session, *, company_id: str, user_id: str | None, anon_id: str | None, file_id: str
+):
+    """Bytes of one of the shopper's own uploads; anybody else's is a 404."""
+    from app.modules.files import service as files_service
+
+    owner = owner_key(user_id, anon_id)
+    record = files_service.get_file(session, company_id, file_id)
+    if record.owner_key != owner:
+        raise NotFoundError("File")
+    path, _name, content_type = files_service.bytes_of(session, record)
+    return record, path, content_type

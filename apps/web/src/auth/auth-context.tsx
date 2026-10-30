@@ -129,6 +129,9 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
 
   const logout = useCallback(async () => {
     await identityApi.logout();
+    clearSensitiveCaches();
+    setSession({ me: null, status: "guest" });
+    window.location.href = "/login";
   }, []);
 
   const switchCompany = useCallback((companyId: string) => {

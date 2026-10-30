@@ -69,20 +69,24 @@ def test_users_active_filter(client, auth_headers):
 
 
 def test_users_role_filter(client, auth_headers):
-    _create_user(client, auth_headers, full_name="Ada Accountant", roles=["accountant"])
+    # The session DB is shared, so other tests' users may hold these roles too:
+    # assert on the users created here only.
+    ada = _create_user(client, auth_headers, full_name="Ada Accountant", roles=["accountant"])
     other = _create_user(client, auth_headers, full_name="Ivan Inventory", roles=["inventory_manager"])
 
     resp = client.get("/api/v1/users", headers=auth_headers, params={"role": "accountant"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["total"] == 1, body
-    assert body["items"][0]["full_name"] == "Ada Accountant"
-    assert body["items"][0]["roles"] == ["accountant"]
+    by_id = {u["id"]: u for u in body["items"]}
+    assert ada["id"] in by_id and other["id"] not in by_id, body
+    assert by_id[ada["id"]]["roles"] == ["accountant"]
+    assert all("accountant" in u["roles"] for u in body["items"])
 
     resp = client.get(
         "/api/v1/users", headers=auth_headers, params={"role": "inventory_manager"}
     ).json()
-    assert [u["id"] for u in resp["items"]] == [other["id"]]
+    ids = [u["id"] for u in resp["items"]]
+    assert other["id"] in ids and ada["id"] not in ids
 
 
 def test_users_server_side_sort(client, auth_headers):

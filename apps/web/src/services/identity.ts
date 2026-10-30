@@ -29,6 +29,9 @@ export interface CompanyOut extends CompanySummary {
   legal_name: string;
   timezone: string;
   locale: string;
+  /** Registered address + GSTIN, printed on tax invoices. */
+  address?: string | null;
+  tax_identifier?: string | null;
 }
 
 export async function login(email: string, password: string): Promise<string> {
@@ -45,6 +48,27 @@ export async function bootstrap(email: string, password: string, full_name: stri
     { email, password, full_name },
   );
   return data.access_token;
+}
+
+export interface ShopperRegisterInput {
+  slug: string;
+  email: string;
+  password: string;
+  full_name: string;
+}
+
+/**
+ * Public storefront signup. The store is resolved by its slug, so the new
+ * account is created as a shopper of that store (no ERP roles).
+ */
+export async function registerShopper(
+  input: ShopperRegisterInput,
+): Promise<{ company_id: string; email: string }> {
+  const { data } = await api.post<never, { data: { company_id: string; email: string } }>(
+    "/storefront/shop/register",
+    input,
+  );
+  return data;
 }
 
 export async function me(): Promise<MeOut> {
@@ -72,5 +96,11 @@ export async function createCompany(input: {
 
 export async function listAllCompanies(): Promise<CompanyOut[]> {
   const { data } = await api.get<CompanyOut[]>("/companies/all");
+  return data;
+}
+
+/** One company's profile (address/GSTIN for invoice headers). */
+export async function getCompany(companyId: string): Promise<CompanyOut> {
+  const { data } = await api.get<CompanyOut>(`/companies/${companyId}`);
   return data;
 }

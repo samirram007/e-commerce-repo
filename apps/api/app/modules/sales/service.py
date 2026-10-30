@@ -2,7 +2,7 @@
 order lifecycle. Backend recomputes prices/taxes — client values are ignored.
 """
 from dataclasses import asdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -19,6 +19,7 @@ from app.modules.invoicing import service as invoicing
 from app.modules.payments import service as payments
 from app.modules.payments.models import PaymentRecord
 from app.modules.partners import service as partners
+from app.modules.promotions import service as promotions
 from app.modules.sales.models import (
     ORDER_STATUSES,
     Cart,
@@ -125,48 +126,105 @@ def remove_cart_item(session: Session, cart: Cart, item_id: str) -> None:
     session.flush()
 
 
-def quote_cart(session: Session, cart: Cart, *, shipping_total=Decimal("0")) -> dict:
-    """Server-side authoritative quote: price + tax per line, totals overall."""
+def quote_cart(
+    session: Session,
+    cart: Cart,
+    *,
+    shipping_total=Decimal("0"),
+    customer_key: str | None = None,
+    strict_coupon: bool = False,
+) -> dict:
+    """Server-side authoritative quote: price + tax per line, totals overall.
+
+    The cart's own promo code is re-priced every time, so a code that stops
+    qualifying (minimum subtotal, redemption limit, expiry) simply stops being
+    applied — unless `strict_coupon` is set, which is what checkout uses to tell
+    the shopper why instead of quietly charging full price.
+    """
     company = _company(session, cart.company_id)
     default_tax_rate_id = taxes.default_sales_tax_id(session, company.id)
     default_tax = (
         dec(session.get(TaxRate, default_tax_rate_id).percentage) if default_tax_rate_id else Decimal("0")
     )
     today = datetime.now(timezone.utc).date()
-    lines = []
-    subtotal = discount_total = tax_total = Decimal("0")
+    priced = []
     for item in cart_items(session, cart.id):
         product = session.get(catalog.Product, item.product_id)
         if product is None:
             raise NotFoundError("Product")
         unit_price = catalog.resolve_price(session, product, currency=company.base_currency, on_date=today)
         qty = dec(item.qty)
-        tax_amount = money(qty * unit_price * default_tax / Decimal("100"), 2)
-        line_total = money(qty * unit_price + tax_amount, 2)
-        subtotal += qty * unit_price
-        tax_total += tax_amount
-        lines.append(
+        priced.append(
             {
                 "item_id": item.id,
                 "product_id": product.id,
+                "category_id": product.category_id,
                 "sku": product.sku,
-                "qty": str(qty),
-                "unit_price": str(unit_price),
+                "qty": qty,
+                "unit_price": unit_price,
+                "amount": money(qty * unit_price, 2),
+            }
+        )
+
+    coupon = promotions.price(
+        session,
+        company.id,
+        cart.coupon_code,
+        [
+            promotions.QuoteLine(
+                product_id=row["product_id"],
+                category_id=row["category_id"],
+                amount=row["amount"],
+            )
+            for row in priced
+        ],
+        customer_key=customer_key,
+        strict=strict_coupon,
+    )
+
+    lines = []
+    subtotal = discount_total = tax_total = Decimal("0")
+    for row in priced:
+        discount = money(coupon.line_discounts.get(row["product_id"], Decimal("0")))
+        # Tax follows the discounted taxable value, exactly as the invoice does.
+        taxable = row["amount"] - discount
+        tax_amount = money(taxable * default_tax / Decimal("100"), 2)
+        line_total = money(taxable + tax_amount, 2)
+        subtotal += row["amount"]
+        discount_total += discount
+        tax_total += tax_amount
+        lines.append(
+            {
+                "item_id": row["item_id"],
+                "product_id": row["product_id"],
+                "sku": row["sku"],
+                "qty": str(row["qty"]),
+                "unit_price": str(row["unit_price"]),
+                "discount": str(discount),
                 "tax_amount": str(tax_amount),
                 "line_total": str(line_total),
             }
         )
     shipping = money(dec(shipping_total), 2)
     total = money(subtotal - discount_total + tax_total + shipping, 2)
+    # GST is charged at one rate here, so the breakup has a single slab; the UI
+    # renders it as "GST 18% · CGST 9% + SGST 9%" instead of an unlabelled "Tax".
+    tax_breakup = (
+        [{"rate": str(default_tax), "amount": str(tax_total)}]
+        if default_tax > 0 and tax_total > 0
+        else []
+    )
     return {
         "cart_id": cart.id,
         "lines": lines,
         "subtotal": str(subtotal),
         "discount_total": str(discount_total),
         "tax_total": str(tax_total),
+        "tax_breakup": tax_breakup,
         "shipping_total": str(shipping),
         "total": str(total),
         "currency": company.base_currency,
+        "coupon": coupon.as_dict() if coupon.code else None,
     }
 
 
@@ -216,7 +274,15 @@ def _checkout_once(
     items = cart_items(session, cart.id)
     if not items:
         raise BusinessRuleError("EMPTY_CART", "Cart is empty")
-    quote = quote_cart(session, cart, shipping_total=shipping_total)
+    # Strict: a code that can no longer be used must fail here, with its reason,
+    # rather than silently dropping off the order the shopper is paying for.
+    quote = quote_cart(
+        session,
+        cart,
+        shipping_total=shipping_total,
+        customer_key=coupon_customer_key(actor_user_id, customer),
+        strict_coupon=True,
+    )
 
     doc_number = allocate_number(session, company_id, "sales_order")
     order = SalesOrder(
@@ -241,6 +307,20 @@ def _checkout_once(
     )
     session.add(order)
     session.flush()
+
+    coupon_quote = quote.get("coupon") or {}
+    coupon = None
+    if coupon_quote.get("valid"):
+        coupon = promotions.get_coupon(session, company_id, coupon_quote["code"])
+        order.coupon_id = coupon.id if coupon else None
+        order.coupon_code = coupon_quote["code"]
+        promotions.redeem(
+            session,
+            coupon=coupon,
+            order_id=order.id,
+            amount=Decimal(coupon_quote["discount_total"]),
+            customer_key=coupon_customer_key(actor_user_id, customer),
+        )
 
     line_number = 1
     for line in quote["lines"]:
@@ -270,7 +350,8 @@ def _checkout_once(
                 description_snapshot=product.name,
                 qty=Decimal(line["qty"]),
                 unit_price=Decimal(line["unit_price"]),
-                discount=Decimal("0"),
+                # the coupon's share of this line, so the invoice reproduces it
+                discount=Decimal(line["discount"]),
                 tax_percentage=default_sales_tax_percentage(session, company_id),
                 line_total=Decimal(line["line_total"]),
                 tax_amount=Decimal(line["tax_amount"]),
@@ -283,6 +364,14 @@ def _checkout_once(
     cart.status = "converted"
     session.flush()
     return order
+
+
+def coupon_customer_key(actor_user_id: str | None, customer) -> str | None:
+    """Who counts as "one customer" for per-customer coupon limits."""
+    if actor_user_id:
+        return actor_user_id
+    email = (getattr(customer, "email", None) or "").strip().lower()
+    return email or None
 
 
 def default_sales_tax_percentage(session: Session, company_id: str) -> Decimal:
@@ -435,6 +524,88 @@ def _charge_once(
     return order, record
 
 
+def accept_cash_on_delivery(
+    session: Session, *, company_id: str, order: SalesOrder, actor_user_id: str | None = None
+) -> PaymentRecord:
+    """Take a COD order: confirm it for fulfilment with an open cash receipt.
+
+    Nothing is recognised yet — the invoice is issued when the courier hands the
+    cash over (see `collect_cash_on_delivery`).
+    """
+    from app.modules.companies.service import rate_for
+
+    company = _company(session, company_id)
+    if order.status != "pending_payment":
+        raise BusinessRuleError(
+            "ORDER_NOT_PAYABLE", f"Order status '{order.status}' cannot be confirmed for COD"
+        )
+    existing = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.order_id == order.id,
+            PaymentRecord.provider == "cash",
+            PaymentRecord.direction == "receipt",
+        )
+    )
+    if existing is not None:
+        return existing
+    exchange_rate = dec(
+        rate_for(
+            session,
+            company_id=company_id,
+            from_currency=order.currency,
+            base_currency=company.base_currency,
+            on_date=order.order_date,
+        )
+    )
+    record = PaymentRecord(
+        company_id=company_id,
+        direction="receipt",
+        method="cod",
+        provider="cash",
+        provider_ref=f"cod:{order.id}",
+        status="pending",
+        amount=dec(order.total),
+        currency=order.currency,
+        exchange_rate=exchange_rate,
+        amount_base=money(dec(order.total) * exchange_rate, 2),
+        customer_id=order.customer_id,
+        order_id=order.id,
+        occurred_at=datetime.now(timezone.utc),
+        idempotency_scope="cod",
+        notes="Cash on delivery",
+        created_by=actor_user_id,
+    )
+    session.add(record)
+    order.status = "confirmed"
+    session.flush()
+    return record
+
+
+def collect_cash_on_delivery(session: Session, *, order: SalesOrder) -> PaymentRecord | None:
+    """Settle the pending COD record when the shipment is delivered.
+
+    Revenue is recognised at that point (invoice issued + posted), matching the
+    prepaid flow. Idempotent: a second delivery callback finds no pending row.
+    """
+    pending = session.scalar(
+        select(PaymentRecord).where(
+            PaymentRecord.order_id == order.id,
+            PaymentRecord.provider == "cash",
+            PaymentRecord.direction == "receipt",
+            PaymentRecord.status == "pending",
+        )
+    )
+    if pending is None:
+        return None
+    pending.status = "succeeded"
+    pending.occurred_at = datetime.now(timezone.utc)
+    order.payment_state = "paid"
+    session.flush()
+    if order.invoice_id is None:
+        _issue_invoice_for_paid_order(session, order, pending.created_by)
+    return pending
+
+
 def _issue_invoice_for_paid_order(session: Session, order: SalesOrder, actor_user_id: str | None) -> None:
     """Issue and post the invoice on payment confirmation."""
     company = _company(session, order.company_id)
@@ -460,6 +631,8 @@ def _issue_invoice_for_paid_order(session: Session, order: SalesOrder, actor_use
         shipping_total=dec(order.shipping_total),
         order_id=order.id,
         source="order",
+        # billing address snapshot: the printed GST invoice needs a buyer address
+        customer_address=order.billing_address or order.shipping_address,
     )
     invoicing.post_invoice(session, invoice, actor_user_id)
     order.invoice_id = invoice.id
@@ -484,9 +657,14 @@ def get_order_lines(session: Session, order_id: str) -> list[OrderLine]:
     )
 
 
-def cancel_order(session: Session, order: SalesOrder, actor_user_id: str | None) -> SalesOrder:
+def cancel_order(
+    session: Session,
+    order: SalesOrder,
+    actor_user_id: str | None,
+    cancel_reason: str | None = None,
+) -> SalesOrder:
     """Cancel unpaid orders — reservations are released; paid orders must be
-    refunded instead (returns module)."""
+    refunded instead (returns module). `cancel_reason` is shown to the shopper."""
     if order.status == "cancelled":
         raise BusinessRuleError("ALREADY_CANCELLED", "Order is already cancelled")
     if order.payment_state == "paid":
@@ -504,10 +682,55 @@ def cancel_order(session: Session, order: SalesOrder, actor_user_id: str | None)
                 actor_user_id=actor_user_id,
             )
             line.reserved_location_id = None
+    # A cash-on-delivery order was never collected: close its open receipt.
+    for pending in session.execute(
+        select(PaymentRecord).where(
+            PaymentRecord.order_id == order.id,
+            PaymentRecord.direction == "receipt",
+            PaymentRecord.status == "pending",
+        )
+    ).scalars():
+        pending.status = "voided"
+        session.flush()
     order.status = "cancelled"
     order.cancelled_at = datetime.now(timezone.utc)
+    order.cancel_reason = cancel_reason
     session.flush()
     return order
+
+
+def expire_unpaid_orders(
+    session: Session, *, company_id: str | None = None, timeout_minutes: int | None = None
+) -> int:
+    """Cancel gateway orders that were never paid, releasing their stock holds.
+
+    Only `pending_payment` orders are touched — COD orders sit in `confirmed`
+    and paid orders are left alone, so a run never disturbs a real sale. Open
+    payment intents are voided by `cancel_order`; replaying a sweep finds
+    nothing and returns 0.
+    """
+    from app.core.config import get_settings
+
+    minutes = (
+        get_settings().order_payment_timeout_minutes
+        if timeout_minutes is None
+        else timeout_minutes
+    )
+    if minutes <= 0:
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    stmt = select(SalesOrder).where(
+        SalesOrder.status == "pending_payment",
+        SalesOrder.payment_state != "paid",
+        SalesOrder.created_at < cutoff,
+    )
+    if company_id is not None:
+        stmt = stmt.where(SalesOrder.company_id == company_id)
+    expired = 0
+    for order in session.execute(stmt).scalars().all():
+        cancel_order(session, order, None, cancel_reason="payment_timeout")
+        expired += 1
+    return expired
 
 
 def list_orders(session: Session, company_id: str, *, status: str | None = None, customer_id: str | None = None, limit: int = 200):

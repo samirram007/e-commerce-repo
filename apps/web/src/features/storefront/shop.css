@@ -1094,3 +1094,23 @@
   font-size: 14px;
 }
 :root[data-resolved-theme="dark"] .shop .img-ph { color: color-mix(in srgb, var(--t2, #ccc) 85%, #fff); }
+
+/* ---- reviews & purchase feedback ---- */
+.shop-reviews-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.shop-reviews-summary { display: inline-flex; align-items: baseline; gap: 8px; }
+.shop-stars { color: #f59e0b; letter-spacing: 2px; }
+.shop-stars-empty { color: #cbd5e1; letter-spacing: 2px; }
+.shop-review-list { display: grid; gap: 10px; margin-top: 10px; }
+.shop-review { border: 1px solid var(--border, #e2e8f0); border-radius: 10px; padding: 10px 12px; }
+.shop-review-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.shop-review-body { margin: 4px 0 0; }
+.shop-feedback { margin-top: 12px; border-top: 1px solid var(--border, #e2e8f0); padding-top: 10px; display: grid; gap: 10px; }
+.shop-feedback-items { display: grid; gap: 10px; }
+.shop-feedback-item { border: 1px solid var(--border, #e2e8f0); border-radius: 10px; padding: 10px 12px; display: grid; gap: 6px; }
+.shop-feedback-item.done { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.shop-feedback-item-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.shop-star-picker { display: flex; align-items: center; gap: 4px; }
+.shop-star-btn { background: none; border: 0; cursor: pointer; font-size: 20px; line-height: 1; color: #cbd5e1; padding: 0 2px; }
+.shop-star-btn.on { color: #f59e0b; }
+.shop-feedback-input, .shop-feedback-textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border, #e2e8f0); border-radius: 8px; font: inherit; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }

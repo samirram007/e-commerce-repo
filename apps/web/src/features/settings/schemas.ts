@@ -25,10 +25,40 @@ export const companySchema = z.object({
   allow_negative_stock: z.boolean(),
   allow_guest_checkout: z.boolean(),
   is_active: z.boolean(),
+  storefront_slug: z.string().nullable().optional(),
 });
 export type Company = z.infer<typeof companySchema>;
 
 export const companyListSchema = z.array(companySchema);
+
+export const companyAddressOutSchema = z.object({
+  id: z.string(),
+  address_type: z.string(),
+  line1: z.string(),
+  line2: z.string().nullable(),
+  city: z.string(),
+  region: z.string().nullable(),
+  postal_code: z.string().nullable(),
+  country: z.string().nullable(),
+  tax_identifier: z.string().nullable(),
+  is_default: z.boolean(),
+});
+export type CompanyAddressOut = z.infer<typeof companyAddressOutSchema>;
+
+export const companyAddressInSchema = z.object({
+  address_type: z.string().min(1, "Address type is required"),
+  line1: z.string().min(1, "Line 1 is required"),
+  line2: z.string().nullable(),
+  city: z.string().min(1, "City is required"),
+  region: z.string().nullable(),
+  postal_code: z.string().nullable(),
+  country: z.string().nullable(),
+  tax_identifier: z.string().nullable(),
+  is_default: z.boolean().default(false),
+});
+export type CompanyAddressIn = z.infer<typeof companyAddressInSchema>;
+
+/* ---- tax rates ---- */
 
 export const companyCreateFormSchema = z.object({
   name: z.string().trim().min(2, "Use at least 2 characters").max(200, "Too long"),
@@ -38,6 +68,7 @@ export const companyCreateFormSchema = z.object({
   locale: z.string().trim().min(1, "Required").max(16, "Too long"),
   address: z.string().trim().max(500, "Too long"),
   tax_identifier: z.string().trim().max(64, "Too long"),
+  storefront_slug: z.string().trim().max(50, "Too long").optional(),
 });
 export type CompanyCreateFormInput = z.input<typeof companyCreateFormSchema>;
 export type CompanyCreatePayload = z.output<typeof companyCreateFormSchema>;
@@ -52,6 +83,7 @@ export const companyUpdateFormSchema = z.object({
   allow_negative_stock: z.boolean(),
   allow_guest_checkout: z.boolean(),
   is_active: z.boolean(),
+  storefront_slug: z.string().trim().max(50, "Too long").optional(),
 });
 export type CompanyUpdateFormInput = z.input<typeof companyUpdateFormSchema>;
 export type CompanyUpdatePayload = z.output<typeof companyUpdateFormSchema>;

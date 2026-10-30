@@ -716,6 +716,8 @@ def delete_policy(row_id: str, ctx: CompanyCtx = Depends(guard(P_STOREFRONT_MANA
 class SettingsIn(BaseModel):
     free_shipping_threshold: Decimal | None = None
     flat_shipping_fee: Decimal | None = None
+    #: Days after delivery a shopper may request a return (0 = no limit).
+    return_window_days: int | None = Field(default=None, ge=0, le=365)
     contact_phone: str | None = Field(default=None, max_length=50)
     contact_email: str | None = Field(default=None, max_length=255)
     contact_address: str | None = Field(default=None, max_length=300)
@@ -741,6 +743,8 @@ def put_settings(payload: SettingsIn, ctx: CompanyCtx = Depends(guard(P_STOREFRO
     data = payload.model_dump()
     row.free_shipping_threshold = _money(data["free_shipping_threshold"], "free_shipping_threshold")
     row.flat_shipping_fee = _money(data["flat_shipping_fee"], "flat_shipping_fee")
+    if data["return_window_days"] is not None:
+        row.return_window_days = int(data["return_window_days"])
     row.contact_phone = data["contact_phone"]
     row.contact_email = data["contact_email"]
     row.contact_address = data["contact_address"]
@@ -754,7 +758,10 @@ def put_settings(payload: SettingsIn, ctx: CompanyCtx = Depends(guard(P_STOREFRO
         session, action="storefront.settings.created" if created else "storefront.settings.updated",
         entity_type="storefront_settings", entity_id=row.id,
         actor_user_id=ctx.user.id, company_id=ctx.company_id,
-        after_data={"free_shipping_threshold": str(row.free_shipping_threshold) if row.free_shipping_threshold else None},
+        after_data={
+            "free_shipping_threshold": str(row.free_shipping_threshold) if row.free_shipping_threshold else None,
+            "return_window_days": row.return_window_days,
+        },
     )
     return svc.settings_out(row, ctx.company_id)
 

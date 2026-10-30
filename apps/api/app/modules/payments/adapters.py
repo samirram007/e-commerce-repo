@@ -633,10 +633,50 @@ class MockGatewayAdapter:
         return True, "Mock gateway is always available"
 
 
+# ---- cash on delivery --------------------------------------------------------
+class CashAdapter:
+    """Cash on delivery: no external call, money is collected by the courier.
+
+    A pending cash record is opened at checkout and settled on delivery
+    (``sales.collect_cash_on_delivery``); refunds are recorded as cash-out so
+    accounting stays complete. Not admin-configurable (not in
+    ``GATEWAY_PROVIDERS``) — it only serves refunds of COD receipts.
+    """
+
+    name = "cash"
+
+    def create_intent(
+        self, creds: GatewayCredentials, *, amount: Decimal, currency: str, receipt: str,
+        customer: dict, idempotency_key: str,
+    ) -> IntentResult:
+        raise BusinessRuleError("CASH_NO_INTENT", "Cash on delivery has no online payment step")
+
+    def verify_client_payment(self, creds: GatewayCredentials, *, payload: dict) -> VerifyResult:
+        return VerifyResult(False, error_code="CASH_NO_INTENT", message="Cash is collected on delivery")
+
+    def parse_webhook(
+        self, creds: GatewayCredentials, *, raw_body: bytes, headers: dict
+    ) -> WebhookEvent:
+        raise BusinessRuleError("WEBHOOK_UNSUPPORTED_PROVIDER", "Cash on delivery has no webhooks")
+
+    def refund(
+        self, creds: GatewayCredentials, *, provider_ref: str, amount: Decimal,
+        currency: str, idempotency_key: str,
+    ) -> ProviderChargeResult:
+        if dec(amount) <= 0:
+            return ProviderChargeResult(self.name, "", False, "INVALID_AMOUNT", "Amount must be positive")
+        digest = hashlib.sha256(f"cash-refund|{provider_ref}|{amount}|{idempotency_key}".encode()).hexdigest()[:16]
+        return ProviderChargeResult(self.name, f"cash_refund_{digest}", True)
+
+    def test_connection(self, creds: GatewayCredentials) -> tuple[bool, str]:
+        return True, "Cash on delivery needs no connection"
+
+
 ADAPTERS: dict[str, PaymentProviderAdapter] = {
     "mock": MockGatewayAdapter(),
     "razorpay": RazorpayAdapter(),
     "stripe": StripeAdapter(),
+    "cash": CashAdapter(),
 }
 
 

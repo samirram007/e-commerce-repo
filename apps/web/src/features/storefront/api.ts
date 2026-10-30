@@ -21,7 +21,13 @@ import type {
   ShopOrder,
   ShopProduct,
   ShopProductDetail,
+  ShopOrderFeedback,
+  ShopOrderFeedbackState,
   ShopProductPage,
+  ShopProductReviews,
+  ShopReturn,
+  ShopReview,
+  ShopShippingOption,
   StoreInfo,
 } from "./types";
 
@@ -150,8 +156,28 @@ export async function clearCart(): Promise<ShopCart> {
   return response.data;
 }
 
+/** Apply a promo code to the cart (validated server-side; the quote is re-priced). */
+export async function applyCoupon(code: string): Promise<ShopCart> {
+  const response = await shopApi.post<ShopCart>("/cart/coupon", { code });
+  return response.data;
+}
+
+/** Drop the applied promo code; the cart goes back to full price. */
+export async function removeCoupon(): Promise<ShopCart> {
+  const response = await shopApi.delete<ShopCart>("/cart/coupon");
+  return response.data;
+}
+
 export async function fetchPaymentMethods(pincode?: string): Promise<PaymentMethod[]> {
   const response = await shopApi.get<PaymentMethod[]>("/payment-methods", {
+    params: pincode ? { pincode } : {},
+  });
+  return response.data;
+}
+
+/** Delivery options the shop configured, priced for the current cart. */
+export async function fetchShippingOptions(pincode?: string): Promise<ShopShippingOption[]> {
+  const response = await shopApi.get<ShopShippingOption[]>("/shipping-options", {
     params: pincode ? { pincode } : {},
   });
   return response.data;
@@ -192,7 +218,7 @@ export async function fetchOrders(): Promise<ShopOrder[]> {
   return response.data;
 }
 
-/** Pay a previously placed (unpaid) order — "continue purchase". */
+/** Pay a previously placed (unpaid) order — "continue purchase" (sandbox). */
 export async function payOrder(orderId: string, method: string): Promise<ShopOrder> {
   const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/pay`, { method });
   return response.data;
@@ -214,5 +240,60 @@ export async function confirmPayment(
   payload: PaymentConfirmPayload,
 ): Promise<ShopOrder> {
   const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/payment/confirm`, payload);
+  return response.data;
+}
+
+/** Cancel an order; paid orders are refunded and credited server-side. */
+export async function cancelOrder(orderId: string): Promise<ShopOrder> {
+  const response = await shopApi.post<ShopOrder>(`/orders/${orderId}/cancel`);
+  return response.data;
+}
+
+/** Published reviews + star summary for a product. */
+export async function fetchProductReviews(productId: string): Promise<ShopProductReviews> {
+  const response = await shopApi.get<ShopProductReviews>(`/products/${productId}/reviews`);
+  return response.data;
+}
+
+/** What a shopper may still review on an order, and what was already sent. */
+export async function fetchOrderFeedbackState(orderId: string): Promise<ShopOrderFeedbackState> {
+  const response = await shopApi.get<ShopOrderFeedbackState>(`/orders/${orderId}/feedback`);
+  return response.data;
+}
+
+/** Review one purchased item (published once the store approves it). */
+export async function submitProductReview(
+  orderId: string,
+  payload: { product_id: string; rating: number; title?: string; body?: string },
+): Promise<ShopReview> {
+  const response = await shopApi.post<ShopReview>(`/orders/${orderId}/reviews`, payload);
+  return response.data;
+}
+
+/** Rate the delivery, the packaging and the service of one order. */
+export async function submitOrderFeedback(
+  orderId: string,
+  payload: {
+    delivery_rating?: number;
+    packaging_rating?: number;
+    service_rating?: number;
+    comment?: string;
+  },
+): Promise<ShopOrderFeedback> {
+  const response = await shopApi.post<ShopOrderFeedback>(`/orders/${orderId}/feedback`, payload);
+  return response.data;
+}
+
+export async function fetchOrderReturns(orderId: string): Promise<ShopReturn[]> {
+  const response = await shopApi.get<ShopReturn[]>(`/orders/${orderId}/returns`);
+  return response.data;
+}
+
+export async function requestOrderReturn(
+  orderId: string,
+  lines: { product_id: string; qty: number }[],
+  notes?: string,
+): Promise<ShopReturn> {
+  const response = await shopApi.post<ShopReturn>(`/orders/${orderId}/returns`, { lines, notes });
   return response.data;
 }

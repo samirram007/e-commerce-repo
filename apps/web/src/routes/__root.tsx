@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router";
+import { createRootRouteWithContext, Outlet } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { AuthProvider, useAuth } from "../auth/auth-context";
 import { ThemeProvider, useTheme } from "../theme/theme-context";
@@ -8,7 +8,7 @@ import { ThemeProvider, useTheme } from "../theme/theme-context";
  * and renders the matched child. Auth guarding happens in the pathless
  * `_guest` / `_protected` layouts.
  */
-export const Route = createRootRoute({ component: RootLayout });
+export const Route = createRootRouteWithContext()({ component: RootLayout });
 
 /** Loads the user's server-side preferences once they are signed in. */
 function ThemePreferencesLoader(): React.JSX.Element | null {

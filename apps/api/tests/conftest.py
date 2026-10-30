@@ -85,7 +85,7 @@ def create_company_counterparties(client, auth_headers) -> dict:
     customer_id = resp.json()["id"]
     resp = client.post("/api/v1/partners/vendors", headers=auth_headers, json={"code": "V-1", "name": "Vend"})
     vendor_id = resp.json()["id"]
-    resp = client.post("/api/v1/catalog/products", headers=auth_headers, json={"sku": "SKU-1", "name": "Widget", "base_price": "20", "base_cost": "10", "stock_type": "stock"})
+    resp = client.post("/api/v1/catalog/products", headers=auth_headers, json={"sku": "SKU-1", "name": "Widget", "hsn_sac": "8473", "base_price": "20", "base_cost": "10", "stock_type": "stock"})
     product_id = resp.json()["id"]
     resp = client.post("/api/v1/storage/locations", headers=auth_headers, json={"code": "WH", "name": "Warehouse", "location_type": "warehouse"})
     wh_id = resp.json()["id"]

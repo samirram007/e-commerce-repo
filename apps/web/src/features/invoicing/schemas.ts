@@ -19,6 +19,8 @@ export const invoiceSchema = z.object({
   doc_number: z.string(),
   customer_id: z.string(),
   customer_name: z.string(),
+  customer_address: z.string().nullable().default(null),
+  customer_tax_identifier: z.string().nullable().default(null),
   status: z.string(),
   invoice_date: z.string(),
   due_date: z.string().nullable(),
@@ -30,6 +32,10 @@ export const invoiceSchema = z.object({
   total: decimalString,
   total_base: decimalString,
   order_id: z.string().nullable(),
+  /** One entry per GST rate (detail responses; list responses may be empty). */
+  tax_breakup: z
+    .array(z.object({ rate: decimalString, taxable: decimalString, amount: decimalString }))
+    .default([]),
 });
 export type Invoice = z.infer<typeof invoiceSchema>;
 
@@ -37,6 +43,8 @@ export const invoiceLineSchema = z.object({
   id: z.string(),
   product_id: z.string().nullable(),
   sku_snapshot: z.string(),
+  /** HSN/SAC snapshot printed on the GST invoice. */
+  hsn_sac: z.string().nullable().default(null),
   description_snapshot: z.string(),
   qty: decimalString,
   unit_price: decimalString,
@@ -117,8 +125,12 @@ export type InvoiceLinePayload = z.output<typeof invoiceLineFormSchema>;
 export const invoiceFormSchema = z.object({
   customer_id: z.string().min(1, "Customer is required"),
   invoice_date: z.string().min(1, "Invoice date is required"),
+  /** Optional buyer address snapshot, printed on the GST invoice. */
+  customer_address: z.string().trim().max(500).optional(),
   currency: z.string().trim().length(3, "3-letter currency code"),
   shipping_total: decimalInput,
+  /** Order-level manual discount, spread across the lines by value. */
+  discount: decimalInput,
   due_date: z
     .string()
     .optional()

@@ -217,7 +217,10 @@ def get_order(order_id: str, ctx: CompanyCtx = Depends(guard(P_SALES_VIEW)), ses
     data["lines"] = [
         {
             "id": l.id, "product_id": l.product_id, "sku": l.sku_snapshot,
+            "description": l.description_snapshot,
             "qty": str(l.qty), "unit_price": str(l.unit_price),
+            # line discount (manual or allocated coupon) is what the invoice bills
+            "discount": str(l.discount), "tax_percentage": str(l.tax_percentage),
             "line_total": str(l.line_total), "tax_amount": str(l.tax_amount),
         }
         for l in lines
@@ -228,7 +231,7 @@ def get_order(order_id: str, ctx: CompanyCtx = Depends(guard(P_SALES_VIEW)), ses
 @router.post("/orders/{order_id}/cancel")
 def cancel_order(order_id: str, ctx: CompanyCtx = Depends(guard(P_SALES_VIEW)), session: Session = Depends(get_db)):
     order = svc.get_order(session, ctx.company_id, order_id)
-    svc.cancel_order(session, order, ctx.user.id)
+    svc.cancel_order(session, order, ctx.user.id, cancel_reason="cancelled_by_staff")
     log_action(session, action="order.cancelled", entity_type="sales_order", entity_id=order.id, actor_user_id=ctx.user.id, company_id=ctx.company_id)
     return {"id": order.id, "status": order.status}
 
@@ -240,9 +243,12 @@ def _order_brief(order: SalesOrder) -> dict:
         "customer_id": order.customer_id,
         "status": order.status,
         "payment_state": order.payment_state,
+        "cancel_reason": order.cancel_reason,
         "order_date": str(order.order_date),
         "currency": order.currency,
         "subtotal": str(order.subtotal),
+        "discount_total": str(order.discount_total),
+        "coupon_code": order.coupon_code,
         "tax_total": str(order.tax_total),
         "shipping_total": str(order.shipping_total),
         "total": str(order.total),

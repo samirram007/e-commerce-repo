@@ -4,6 +4,8 @@ import {
   closeFiscalYearResultSchema,
   companyListSchema,
   companySchema,
+  companyAddressOutSchema,
+  CompanyAddressOut,
   fiscalYearListSchema,
   fiscalYearPeriodListSchema,
   fiscalYearSchema,
@@ -52,6 +54,19 @@ export async function updateCompany(
 ): Promise<Company> {
   const { data } = await api.patch(`/companies/${id}`, input);
   return companySchema.parse(data);
+}
+
+export async function fetchCompanyAddresses(companyId: string): Promise<CompanyAddressOut[]> {
+  const { data } = await api.get(`/companies/${companyId}/addresses`);
+  return companyAddressOutSchema.parse(data) as unknown as CompanyAddressOut[];
+}
+
+export async function updateCompanyAddresses(
+  companyId: string,
+  addresses: any[],
+): Promise<CompanyAddressOut[]> {
+  const { data } = await api.patch(`/companies/${companyId}/addresses`, { addresses });
+  return companyAddressOutSchema.parse(data) as unknown as CompanyAddressOut[];
 }
 
 /* ---- tax rates ---- */

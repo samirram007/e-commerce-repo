@@ -56,6 +56,7 @@ class InvoiceLine(Base, TimestampMixin):
     product_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # snapshot fields (what the customer was actually sold/billed)
     sku_snapshot: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    hsn_sac_snapshot: Mapped[str | None] = mapped_column(String(12), nullable=True)
     description_snapshot: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)

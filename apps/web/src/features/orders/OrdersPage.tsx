@@ -204,6 +204,14 @@ export function OrdersPage() {
     { key: "sku", header: "SKU", render: (l) => l.sku },
     { key: "qty", header: "Qty", align: "right", render: (l) => formatQty(l.qty) },
     { key: "price", header: "Unit price", align: "right", render: (l) => formatMoney(l.unit_price) },
+    {
+      key: "discount",
+      header: "Discount",
+      align: "right",
+      // a line discount is already reflected in each line's tax and total
+      render: (l) =>
+        Number(l.discount ?? 0) > 0 ? `-${formatMoney(l.discount ?? "0")}` : "—",
+    },
     { key: "tax", header: "Tax", align: "right", render: (l) => formatMoney(l.tax_amount) },
     { key: "total", header: "Line total", align: "right", render: (l) => formatMoney(l.line_total) },
   ];
@@ -440,6 +448,16 @@ export function OrdersPage() {
                   <div className="muted">Total</div>
                   <div>{formatMoney(detailOrder.total, detailOrder.currency)}</div>
                 </div>
+                {Number(detailOrder.discount_total ?? 0) > 0 ? (
+                  <div>
+                    <div className="muted">
+                      Discount{detailOrder.coupon_code ? ` · ${detailOrder.coupon_code}` : ""}
+                    </div>
+                    <div>
+                      -{formatMoney(detailOrder.discount_total ?? "0", detailOrder.currency)}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               <Card title="Lines">
                 <DataTable

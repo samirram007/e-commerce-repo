@@ -14,9 +14,11 @@ import { Route as GuestRouteImport } from './routes/_guest'
 import { Route as ProtectedRouteImport } from './routes/_protected'
 import { Route as ShopRouteImport } from './routes/_shop'
 import { Route as GuestLoginRouteImport } from './routes/_guest/login'
+import { Route as GuestRegisterRouteImport } from './routes/_guest/register'
 import { Route as ProtectedAccountingRouteImport } from './routes/_protected/accounting'
 import { Route as ProtectedAuditRouteImport } from './routes/_protected/audit'
 import { Route as ProtectedDashboardRouteImport } from './routes/_protected/dashboard'
+import { Route as ProtectedFeedbackRouteImport } from './routes/_protected/feedback'
 import { Route as ProtectedInventoryRouteImport } from './routes/_protected/inventory'
 import { Route as ProtectedInvoicesRouteImport } from './routes/_protected/invoices'
 import { Route as ProtectedOrdersRouteImport } from './routes/_protected/orders'
@@ -24,6 +26,7 @@ import { Route as ProtectedPartnersRouteImport } from './routes/_protected/partn
 import { Route as ProtectedPaymentsRouteImport } from './routes/_protected/payments'
 import { Route as ProtectedPayrollRouteImport } from './routes/_protected/payroll'
 import { Route as ProtectedProductsRouteImport } from './routes/_protected/products'
+import { Route as ProtectedPromotionsRouteImport } from './routes/_protected/promotions'
 import { Route as ProtectedPurchaseOrdersRouteImport } from './routes/_protected/purchase-orders'
 import { Route as ProtectedReportsRouteImport } from './routes/_protected/reports'
 import { Route as ProtectedReturnsRouteImport } from './routes/_protected/returns'
@@ -31,6 +34,7 @@ import { Route as ProtectedRolesRouteImport } from './routes/_protected/roles'
 import { Route as ProtectedSettingsRouteImport } from './routes/_protected/settings'
 import { Route as ProtectedSetupRouteImport } from './routes/_protected/setup'
 import { Route as ProtectedShipmentsRouteImport } from './routes/_protected/shipments'
+import { Route as ProtectedShippingCarriersRouteImport } from './routes/_protected/shipping-carriers'
 import { Route as ProtectedUsersRouteImport } from './routes/_protected/users'
 import { Route as ShopIndexRouteImport } from './routes/_shop/index'
 import { Route as ShopAboutRouteImport } from './routes/_shop/about'
@@ -41,10 +45,12 @@ import { Route as ShopContactRouteImport } from './routes/_shop/contact'
 import { Route as ShopDealsRouteImport } from './routes/_shop/deals'
 import { Route as ShopFaqRouteImport } from './routes/_shop/faq'
 import { Route as ShopOrderSuccessRouteImport } from './routes/_shop/order-success'
-import { Route as ShopWishlistRouteImport } from './routes/_shop/wishlist'
+import { Route as ShopShopRouteImport } from './routes/_shop/shop'
 import { Route as ShopPoliciesSlugRouteImport } from './routes/_shop/policies.$slug'
 import { Route as ShopShopIndexRouteImport } from './routes/_shop/shop.index'
 import { Route as ShopShopProductIdRouteImport } from './routes/_shop/shop.$productId'
+import { Route as ShopShopOrdersRouteImport } from './routes/_shop/shop.orders'
+import { Route as ShopShopWishlistRouteImport } from './routes/_shop/shop.wishlist'
 
 const SplatRoute = SplatRouteImport.update({
   id: '/$',
@@ -68,6 +74,11 @@ const GuestLoginRoute = GuestLoginRouteImport.update({
   path: '/login',
   getParentRoute: () => GuestRoute,
 } as any)
+const GuestRegisterRoute = GuestRegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => GuestRoute,
+} as any)
 const ProtectedAccountingRoute = ProtectedAccountingRouteImport.update({
   id: '/accounting',
   path: '/accounting',
@@ -81,6 +92,11 @@ const ProtectedAuditRoute = ProtectedAuditRouteImport.update({
 const ProtectedDashboardRoute = ProtectedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => ProtectedRoute,
+} as any)
+const ProtectedFeedbackRoute = ProtectedFeedbackRouteImport.update({
+  id: '/feedback',
+  path: '/feedback',
   getParentRoute: () => ProtectedRoute,
 } as any)
 const ProtectedInventoryRoute = ProtectedInventoryRouteImport.update({
@@ -118,6 +134,11 @@ const ProtectedProductsRoute = ProtectedProductsRouteImport.update({
   path: '/products',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedPromotionsRoute = ProtectedPromotionsRouteImport.update({
+  id: '/promotions',
+  path: '/promotions',
+  getParentRoute: () => ProtectedRoute,
+} as any)
 const ProtectedPurchaseOrdersRoute = ProtectedPurchaseOrdersRouteImport.update({
   id: '/purchase-orders',
   path: '/purchase-orders',
@@ -153,6 +174,12 @@ const ProtectedShipmentsRoute = ProtectedShipmentsRouteImport.update({
   path: '/shipments',
   getParentRoute: () => ProtectedRoute,
 } as any)
+const ProtectedShippingCarriersRoute =
+  ProtectedShippingCarriersRouteImport.update({
+    id: '/shipping-carriers',
+    path: '/shipping-carriers',
+    getParentRoute: () => ProtectedRoute,
+  } as any)
 const ProtectedUsersRoute = ProtectedUsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -203,9 +230,9 @@ const ShopOrderSuccessRoute = ShopOrderSuccessRouteImport.update({
   path: '/order-success',
   getParentRoute: () => ShopRoute,
 } as any)
-const ShopWishlistRoute = ShopWishlistRouteImport.update({
-  id: '/wishlist',
-  path: '/wishlist',
+const ShopShopRoute = ShopShopRouteImport.update({
+  id: '/shop',
+  path: '/shop',
   getParentRoute: () => ShopRoute,
 } as any)
 const ShopPoliciesSlugRoute = ShopPoliciesSlugRouteImport.update({
@@ -214,23 +241,35 @@ const ShopPoliciesSlugRoute = ShopPoliciesSlugRouteImport.update({
   getParentRoute: () => ShopRoute,
 } as any)
 const ShopShopIndexRoute = ShopShopIndexRouteImport.update({
-  id: '/shop/',
-  path: '/shop/',
-  getParentRoute: () => ShopRoute,
+  id: '/',
+  path: '/',
+  getParentRoute: () => ShopShopRoute,
 } as any)
 const ShopShopProductIdRoute = ShopShopProductIdRouteImport.update({
-  id: '/shop/$productId',
-  path: '/shop/$productId',
-  getParentRoute: () => ShopRoute,
+  id: '/$productId',
+  path: '/$productId',
+  getParentRoute: () => ShopShopRoute,
+} as any)
+const ShopShopOrdersRoute = ShopShopOrdersRouteImport.update({
+  id: '/orders',
+  path: '/orders',
+  getParentRoute: () => ShopShopRoute,
+} as any)
+const ShopShopWishlistRoute = ShopShopWishlistRouteImport.update({
+  id: '/wishlist',
+  path: '/wishlist',
+  getParentRoute: () => ShopShopRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/$': typeof SplatRoute
   '/': typeof ShopIndexRoute
   '/login': typeof GuestLoginRoute
+  '/register': typeof GuestRegisterRoute
   '/accounting': typeof ProtectedAccountingRoute
   '/audit': typeof ProtectedAuditRoute
   '/dashboard': typeof ProtectedDashboardRoute
+  '/feedback': typeof ProtectedFeedbackRoute
   '/inventory': typeof ProtectedInventoryRoute
   '/invoices': typeof ProtectedInvoicesRoute
   '/orders': typeof ProtectedOrdersRoute
@@ -238,6 +277,7 @@ export interface FileRoutesByFullPath {
   '/payments': typeof ProtectedPaymentsRoute
   '/payroll': typeof ProtectedPayrollRoute
   '/products': typeof ProtectedProductsRoute
+  '/promotions': typeof ProtectedPromotionsRoute
   '/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/reports': typeof ProtectedReportsRoute
   '/returns': typeof ProtectedReturnsRoute
@@ -245,6 +285,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof ProtectedSettingsRoute
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
+  '/shipping-carriers': typeof ProtectedShippingCarriersRoute
   '/users': typeof ProtectedUsersRoute
   '/about': typeof ShopAboutRoute
   '/cart': typeof ShopCartRoute
@@ -254,18 +295,22 @@ export interface FileRoutesByFullPath {
   '/deals': typeof ShopDealsRoute
   '/faq': typeof ShopFaqRoute
   '/order-success': typeof ShopOrderSuccessRoute
-  '/wishlist': typeof ShopWishlistRoute
+  '/shop': typeof ShopShopRouteWithChildren
   '/policies/$slug': typeof ShopPoliciesSlugRoute
   '/shop/$productId': typeof ShopShopProductIdRoute
+  '/shop/orders': typeof ShopShopOrdersRoute
+  '/shop/wishlist': typeof ShopShopWishlistRoute
   '/shop/': typeof ShopShopIndexRoute
 }
 export interface FileRoutesByTo {
   '/$': typeof SplatRoute
   '/': typeof ShopIndexRoute
   '/login': typeof GuestLoginRoute
+  '/register': typeof GuestRegisterRoute
   '/accounting': typeof ProtectedAccountingRoute
   '/audit': typeof ProtectedAuditRoute
   '/dashboard': typeof ProtectedDashboardRoute
+  '/feedback': typeof ProtectedFeedbackRoute
   '/inventory': typeof ProtectedInventoryRoute
   '/invoices': typeof ProtectedInvoicesRoute
   '/orders': typeof ProtectedOrdersRoute
@@ -273,6 +318,7 @@ export interface FileRoutesByTo {
   '/payments': typeof ProtectedPaymentsRoute
   '/payroll': typeof ProtectedPayrollRoute
   '/products': typeof ProtectedProductsRoute
+  '/promotions': typeof ProtectedPromotionsRoute
   '/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/reports': typeof ProtectedReportsRoute
   '/returns': typeof ProtectedReturnsRoute
@@ -280,6 +326,7 @@ export interface FileRoutesByTo {
   '/settings': typeof ProtectedSettingsRoute
   '/setup': typeof ProtectedSetupRoute
   '/shipments': typeof ProtectedShipmentsRoute
+  '/shipping-carriers': typeof ProtectedShippingCarriersRoute
   '/users': typeof ProtectedUsersRoute
   '/about': typeof ShopAboutRoute
   '/cart': typeof ShopCartRoute
@@ -289,9 +336,10 @@ export interface FileRoutesByTo {
   '/deals': typeof ShopDealsRoute
   '/faq': typeof ShopFaqRoute
   '/order-success': typeof ShopOrderSuccessRoute
-  '/wishlist': typeof ShopWishlistRoute
   '/policies/$slug': typeof ShopPoliciesSlugRoute
   '/shop/$productId': typeof ShopShopProductIdRoute
+  '/shop/orders': typeof ShopShopOrdersRoute
+  '/shop/wishlist': typeof ShopShopWishlistRoute
   '/shop': typeof ShopShopIndexRoute
 }
 export interface FileRoutesById {
@@ -301,9 +349,11 @@ export interface FileRoutesById {
   '/_protected': typeof ProtectedRouteWithChildren
   '/_shop': typeof ShopRouteWithChildren
   '/_guest/login': typeof GuestLoginRoute
+  '/_guest/register': typeof GuestRegisterRoute
   '/_protected/accounting': typeof ProtectedAccountingRoute
   '/_protected/audit': typeof ProtectedAuditRoute
   '/_protected/dashboard': typeof ProtectedDashboardRoute
+  '/_protected/feedback': typeof ProtectedFeedbackRoute
   '/_protected/inventory': typeof ProtectedInventoryRoute
   '/_protected/invoices': typeof ProtectedInvoicesRoute
   '/_protected/orders': typeof ProtectedOrdersRoute
@@ -311,6 +361,7 @@ export interface FileRoutesById {
   '/_protected/payments': typeof ProtectedPaymentsRoute
   '/_protected/payroll': typeof ProtectedPayrollRoute
   '/_protected/products': typeof ProtectedProductsRoute
+  '/_protected/promotions': typeof ProtectedPromotionsRoute
   '/_protected/purchase-orders': typeof ProtectedPurchaseOrdersRoute
   '/_protected/reports': typeof ProtectedReportsRoute
   '/_protected/returns': typeof ProtectedReturnsRoute
@@ -318,6 +369,7 @@ export interface FileRoutesById {
   '/_protected/settings': typeof ProtectedSettingsRoute
   '/_protected/setup': typeof ProtectedSetupRoute
   '/_protected/shipments': typeof ProtectedShipmentsRoute
+  '/_protected/shipping-carriers': typeof ProtectedShippingCarriersRoute
   '/_protected/users': typeof ProtectedUsersRoute
   '/_shop/about': typeof ShopAboutRoute
   '/_shop/cart': typeof ShopCartRoute
@@ -327,10 +379,12 @@ export interface FileRoutesById {
   '/_shop/deals': typeof ShopDealsRoute
   '/_shop/faq': typeof ShopFaqRoute
   '/_shop/order-success': typeof ShopOrderSuccessRoute
-  '/_shop/wishlist': typeof ShopWishlistRoute
+  '/_shop/shop': typeof ShopShopRouteWithChildren
   '/_shop/': typeof ShopIndexRoute
   '/_shop/policies/$slug': typeof ShopPoliciesSlugRoute
   '/_shop/shop/$productId': typeof ShopShopProductIdRoute
+  '/_shop/shop/orders': typeof ShopShopOrdersRoute
+  '/_shop/shop/wishlist': typeof ShopShopWishlistRoute
   '/_shop/shop/': typeof ShopShopIndexRoute
 }
 export interface FileRouteTypes {
@@ -339,9 +393,11 @@ export interface FileRouteTypes {
     | '/$'
     | '/'
     | '/login'
+    | '/register'
     | '/accounting'
     | '/audit'
     | '/dashboard'
+    | '/feedback'
     | '/inventory'
     | '/invoices'
     | '/orders'
@@ -349,6 +405,7 @@ export interface FileRouteTypes {
     | '/payments'
     | '/payroll'
     | '/products'
+    | '/promotions'
     | '/purchase-orders'
     | '/reports'
     | '/returns'
@@ -356,6 +413,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/shipments'
+    | '/shipping-carriers'
     | '/users'
     | '/about'
     | '/cart'
@@ -365,18 +423,22 @@ export interface FileRouteTypes {
     | '/deals'
     | '/faq'
     | '/order-success'
-    | '/wishlist'
+    | '/shop'
     | '/policies/$slug'
     | '/shop/$productId'
+    | '/shop/orders'
+    | '/shop/wishlist'
     | '/shop/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/$'
     | '/'
     | '/login'
+    | '/register'
     | '/accounting'
     | '/audit'
     | '/dashboard'
+    | '/feedback'
     | '/inventory'
     | '/invoices'
     | '/orders'
@@ -384,6 +446,7 @@ export interface FileRouteTypes {
     | '/payments'
     | '/payroll'
     | '/products'
+    | '/promotions'
     | '/purchase-orders'
     | '/reports'
     | '/returns'
@@ -391,6 +454,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/shipments'
+    | '/shipping-carriers'
     | '/users'
     | '/about'
     | '/cart'
@@ -400,9 +464,10 @@ export interface FileRouteTypes {
     | '/deals'
     | '/faq'
     | '/order-success'
-    | '/wishlist'
     | '/policies/$slug'
     | '/shop/$productId'
+    | '/shop/orders'
+    | '/shop/wishlist'
     | '/shop'
   id:
     | '__root__'
@@ -411,9 +476,11 @@ export interface FileRouteTypes {
     | '/_protected'
     | '/_shop'
     | '/_guest/login'
+    | '/_guest/register'
     | '/_protected/accounting'
     | '/_protected/audit'
     | '/_protected/dashboard'
+    | '/_protected/feedback'
     | '/_protected/inventory'
     | '/_protected/invoices'
     | '/_protected/orders'
@@ -421,6 +488,7 @@ export interface FileRouteTypes {
     | '/_protected/payments'
     | '/_protected/payroll'
     | '/_protected/products'
+    | '/_protected/promotions'
     | '/_protected/purchase-orders'
     | '/_protected/reports'
     | '/_protected/returns'
@@ -428,6 +496,7 @@ export interface FileRouteTypes {
     | '/_protected/settings'
     | '/_protected/setup'
     | '/_protected/shipments'
+    | '/_protected/shipping-carriers'
     | '/_protected/users'
     | '/_shop/about'
     | '/_shop/cart'
@@ -437,10 +506,12 @@ export interface FileRouteTypes {
     | '/_shop/deals'
     | '/_shop/faq'
     | '/_shop/order-success'
-    | '/_shop/wishlist'
+    | '/_shop/shop'
     | '/_shop/'
     | '/_shop/policies/$slug'
     | '/_shop/shop/$productId'
+    | '/_shop/shop/orders'
+    | '/_shop/shop/wishlist'
     | '/_shop/shop/'
   fileRoutesById: FileRoutesById
 }
@@ -488,6 +559,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuestLoginRouteImport
       parentRoute: typeof GuestRoute
     }
+    '/_guest/register': {
+      id: '/_guest/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof GuestRegisterRouteImport
+      parentRoute: typeof GuestRoute
+    }
     '/_protected/accounting': {
       id: '/_protected/accounting'
       path: '/accounting'
@@ -507,6 +585,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof ProtectedDashboardRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
+    '/_protected/feedback': {
+      id: '/_protected/feedback'
+      path: '/feedback'
+      fullPath: '/feedback'
+      preLoaderRoute: typeof ProtectedFeedbackRouteImport
       parentRoute: typeof ProtectedRoute
     }
     '/_protected/inventory': {
@@ -558,6 +643,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProtectedProductsRouteImport
       parentRoute: typeof ProtectedRoute
     }
+    '/_protected/promotions': {
+      id: '/_protected/promotions'
+      path: '/promotions'
+      fullPath: '/promotions'
+      preLoaderRoute: typeof ProtectedPromotionsRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
     '/_protected/purchase-orders': {
       id: '/_protected/purchase-orders'
       path: '/purchase-orders'
@@ -605,6 +697,13 @@ declare module '@tanstack/react-router' {
       path: '/shipments'
       fullPath: '/shipments'
       preLoaderRoute: typeof ProtectedShipmentsRouteImport
+      parentRoute: typeof ProtectedRoute
+    }
+    '/_protected/shipping-carriers': {
+      id: '/_protected/shipping-carriers'
+      path: '/shipping-carriers'
+      fullPath: '/shipping-carriers'
+      preLoaderRoute: typeof ProtectedShippingCarriersRouteImport
       parentRoute: typeof ProtectedRoute
     }
     '/_protected/users': {
@@ -677,11 +776,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShopOrderSuccessRouteImport
       parentRoute: typeof ShopRoute
     }
-    '/_shop/wishlist': {
-      id: '/_shop/wishlist'
-      path: '/wishlist'
-      fullPath: '/wishlist'
-      preLoaderRoute: typeof ShopWishlistRouteImport
+    '/_shop/shop': {
+      id: '/_shop/shop'
+      path: '/shop'
+      fullPath: '/shop'
+      preLoaderRoute: typeof ShopShopRouteImport
       parentRoute: typeof ShopRoute
     }
     '/_shop/policies/$slug': {
@@ -693,27 +792,43 @@ declare module '@tanstack/react-router' {
     }
     '/_shop/shop/': {
       id: '/_shop/shop/'
-      path: '/shop'
+      path: '/'
       fullPath: '/shop/'
       preLoaderRoute: typeof ShopShopIndexRouteImport
-      parentRoute: typeof ShopRoute
+      parentRoute: typeof ShopShopRoute
     }
     '/_shop/shop/$productId': {
       id: '/_shop/shop/$productId'
-      path: '/shop/$productId'
+      path: '/$productId'
       fullPath: '/shop/$productId'
       preLoaderRoute: typeof ShopShopProductIdRouteImport
-      parentRoute: typeof ShopRoute
+      parentRoute: typeof ShopShopRoute
+    }
+    '/_shop/shop/orders': {
+      id: '/_shop/shop/orders'
+      path: '/orders'
+      fullPath: '/shop/orders'
+      preLoaderRoute: typeof ShopShopOrdersRouteImport
+      parentRoute: typeof ShopShopRoute
+    }
+    '/_shop/shop/wishlist': {
+      id: '/_shop/shop/wishlist'
+      path: '/wishlist'
+      fullPath: '/shop/wishlist'
+      preLoaderRoute: typeof ShopShopWishlistRouteImport
+      parentRoute: typeof ShopShopRoute
     }
   }
 }
 
 interface GuestRouteChildren {
   GuestLoginRoute: typeof GuestLoginRoute
+  GuestRegisterRoute: typeof GuestRegisterRoute
 }
 
 const GuestRouteChildren: GuestRouteChildren = {
   GuestLoginRoute: GuestLoginRoute,
+  GuestRegisterRoute: GuestRegisterRoute,
 }
 
 const GuestRouteWithChildren = GuestRoute._addFileChildren(GuestRouteChildren)
@@ -722,6 +837,7 @@ interface ProtectedRouteChildren {
   ProtectedAccountingRoute: typeof ProtectedAccountingRoute
   ProtectedAuditRoute: typeof ProtectedAuditRoute
   ProtectedDashboardRoute: typeof ProtectedDashboardRoute
+  ProtectedFeedbackRoute: typeof ProtectedFeedbackRoute
   ProtectedInventoryRoute: typeof ProtectedInventoryRoute
   ProtectedInvoicesRoute: typeof ProtectedInvoicesRoute
   ProtectedOrdersRoute: typeof ProtectedOrdersRoute
@@ -729,6 +845,7 @@ interface ProtectedRouteChildren {
   ProtectedPaymentsRoute: typeof ProtectedPaymentsRoute
   ProtectedPayrollRoute: typeof ProtectedPayrollRoute
   ProtectedProductsRoute: typeof ProtectedProductsRoute
+  ProtectedPromotionsRoute: typeof ProtectedPromotionsRoute
   ProtectedPurchaseOrdersRoute: typeof ProtectedPurchaseOrdersRoute
   ProtectedReportsRoute: typeof ProtectedReportsRoute
   ProtectedReturnsRoute: typeof ProtectedReturnsRoute
@@ -736,6 +853,7 @@ interface ProtectedRouteChildren {
   ProtectedSettingsRoute: typeof ProtectedSettingsRoute
   ProtectedSetupRoute: typeof ProtectedSetupRoute
   ProtectedShipmentsRoute: typeof ProtectedShipmentsRoute
+  ProtectedShippingCarriersRoute: typeof ProtectedShippingCarriersRoute
   ProtectedUsersRoute: typeof ProtectedUsersRoute
 }
 
@@ -743,6 +861,7 @@ const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedAccountingRoute: ProtectedAccountingRoute,
   ProtectedAuditRoute: ProtectedAuditRoute,
   ProtectedDashboardRoute: ProtectedDashboardRoute,
+  ProtectedFeedbackRoute: ProtectedFeedbackRoute,
   ProtectedInventoryRoute: ProtectedInventoryRoute,
   ProtectedInvoicesRoute: ProtectedInvoicesRoute,
   ProtectedOrdersRoute: ProtectedOrdersRoute,
@@ -750,6 +869,7 @@ const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedPaymentsRoute: ProtectedPaymentsRoute,
   ProtectedPayrollRoute: ProtectedPayrollRoute,
   ProtectedProductsRoute: ProtectedProductsRoute,
+  ProtectedPromotionsRoute: ProtectedPromotionsRoute,
   ProtectedPurchaseOrdersRoute: ProtectedPurchaseOrdersRoute,
   ProtectedReportsRoute: ProtectedReportsRoute,
   ProtectedReturnsRoute: ProtectedReturnsRoute,
@@ -757,11 +877,30 @@ const ProtectedRouteChildren: ProtectedRouteChildren = {
   ProtectedSettingsRoute: ProtectedSettingsRoute,
   ProtectedSetupRoute: ProtectedSetupRoute,
   ProtectedShipmentsRoute: ProtectedShipmentsRoute,
+  ProtectedShippingCarriersRoute: ProtectedShippingCarriersRoute,
   ProtectedUsersRoute: ProtectedUsersRoute,
 }
 
 const ProtectedRouteWithChildren = ProtectedRoute._addFileChildren(
   ProtectedRouteChildren,
+)
+
+interface ShopShopRouteChildren {
+  ShopShopProductIdRoute: typeof ShopShopProductIdRoute
+  ShopShopOrdersRoute: typeof ShopShopOrdersRoute
+  ShopShopWishlistRoute: typeof ShopShopWishlistRoute
+  ShopShopIndexRoute: typeof ShopShopIndexRoute
+}
+
+const ShopShopRouteChildren: ShopShopRouteChildren = {
+  ShopShopProductIdRoute: ShopShopProductIdRoute,
+  ShopShopOrdersRoute: ShopShopOrdersRoute,
+  ShopShopWishlistRoute: ShopShopWishlistRoute,
+  ShopShopIndexRoute: ShopShopIndexRoute,
+}
+
+const ShopShopRouteWithChildren = ShopShopRoute._addFileChildren(
+  ShopShopRouteChildren,
 )
 
 interface ShopRouteChildren {
@@ -773,11 +912,9 @@ interface ShopRouteChildren {
   ShopDealsRoute: typeof ShopDealsRoute
   ShopFaqRoute: typeof ShopFaqRoute
   ShopOrderSuccessRoute: typeof ShopOrderSuccessRoute
-  ShopWishlistRoute: typeof ShopWishlistRoute
+  ShopShopRoute: typeof ShopShopRouteWithChildren
   ShopIndexRoute: typeof ShopIndexRoute
   ShopPoliciesSlugRoute: typeof ShopPoliciesSlugRoute
-  ShopShopProductIdRoute: typeof ShopShopProductIdRoute
-  ShopShopIndexRoute: typeof ShopShopIndexRoute
 }
 
 const ShopRouteChildren: ShopRouteChildren = {
@@ -789,11 +926,9 @@ const ShopRouteChildren: ShopRouteChildren = {
   ShopDealsRoute: ShopDealsRoute,
   ShopFaqRoute: ShopFaqRoute,
   ShopOrderSuccessRoute: ShopOrderSuccessRoute,
-  ShopWishlistRoute: ShopWishlistRoute,
+  ShopShopRoute: ShopShopRouteWithChildren,
   ShopIndexRoute: ShopIndexRoute,
   ShopPoliciesSlugRoute: ShopPoliciesSlugRoute,
-  ShopShopProductIdRoute: ShopShopProductIdRoute,
-  ShopShopIndexRoute: ShopShopIndexRoute,
 }
 
 const ShopRouteWithChildren = ShopRoute._addFileChildren(ShopRouteChildren)

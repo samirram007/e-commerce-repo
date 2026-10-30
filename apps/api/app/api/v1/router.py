@@ -5,6 +5,9 @@ from app.modules.accounting.router import router as accounting_router
 from app.modules.audit.router import router as audit_router
 from app.modules.catalog.router import router as catalog_router
 from app.modules.companies.router import router as companies_router
+from app.modules.delivery.router import router as delivery_router
+from app.modules.feedback.router import router as feedback_router
+from app.modules.files.router import router as files_router
 from app.modules.fiscal_years.router import router as fiscal_router
 from app.modules.fulfillment.router import router as fulfillment_router
 from app.modules.identity.router import router as identity_router
@@ -14,6 +17,7 @@ from app.modules.partners.router import router as partners_router
 from app.modules.payments.gateway_router import router as gateway_router
 from app.modules.payments.router import router as payments_router
 from app.modules.payments.webhook_router import router as webhook_router
+from app.modules.promotions.router import router as promotions_router
 from app.modules.payroll.router import router as payroll_router
 from app.modules.periods.router import router as periods_router
 from app.modules.purchasing.router import router as purchasing_router
@@ -42,11 +46,14 @@ api_router.include_router(invoicing_router)
 api_router.include_router(payments_router)
 api_router.include_router(gateway_router)
 api_router.include_router(webhook_router)
+api_router.include_router(promotions_router)
+api_router.include_router(feedback_router)
+api_router.include_router(files_router)
 api_router.include_router(payroll_router)
 api_router.include_router(fulfillment_router)
+api_router.include_router(delivery_router)
 api_router.include_router(returns_router)
 api_router.include_router(reports_router)
 api_router.include_router(periods_router)
 api_router.include_router(audit_router)
-api_router.include_router(storefront_router)
 api_router.include_router(storefront_admin_router)

@@ -1,4 +1,5 @@
 """Catalog service: product CRUD, categories, UoM, price resolution."""
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -17,6 +18,8 @@ from app.modules.catalog.models import (
 from app.shared.money import dec, qty as q4
 
 VALID_STOCK_TYPES = {"stock", "service", "non_inventory"}
+#: HSN is 4/6/8 digits, SAC is 6 digits; both are plain digit codes.
+HSN_SAC_PATTERN = re.compile(r"^\d{4,8}$")
 
 
 # ---- categories ----
@@ -126,11 +129,26 @@ def update_product(session: Session, product: Product, data: dict) -> Product:
 
 def _product_fields(data: dict, updating: bool = False) -> dict:
     allowed = {
-        "sku", "name", "description", "category_id", "uom_id", "barcode", "stock_type",
-        "track_batches", "track_serials", "base_cost", "base_price", "default_tax_rate_id",
-        "is_active", "is_sellable", "is_purchasable",
+        "sku", "name", "description", "category_id", "uom_id", "barcode", "hsn_sac",
+        "stock_type", "track_batches", "track_serials", "base_cost", "base_price",
+        "weight_kg", "length_cm", "width_cm", "height_cm",
+        "default_tax_rate_id", "is_active", "is_sellable", "is_purchasable",
     }
     raw = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if "hsn_sac" in raw:
+        raw["hsn_sac"] = str(raw["hsn_sac"]).strip() or None
+        if raw["hsn_sac"] is not None and not HSN_SAC_PATTERN.match(raw["hsn_sac"]):
+            raise BusinessRuleError(
+                "BAD_HSN_SAC", "hsn_sac must be a 4 to 8 digit HSN/SAC code"
+            )
+        if raw["hsn_sac"] is None:
+            raw.pop("hsn_sac")
+    for measure in ("weight_kg", "length_cm", "width_cm", "height_cm"):
+        if measure in raw:
+            value = dec(raw[measure])
+            if value < 0:
+                raise BusinessRuleError("BAD_MEASURE", f"{measure} cannot be negative")
+            raw[measure] = q4(value) if measure == "weight_kg" else value
     if "base_cost" in raw:
         raw["base_cost"] = dec(raw["base_cost"])
     if "base_price" in raw:

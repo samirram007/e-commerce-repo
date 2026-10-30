@@ -31,10 +31,13 @@ type AppPath =
   | "/inventory"
   | "/invoices"
   | "/payments"
+  | "/shipping-carriers"
   | "/accounting"
   | "/reports"
   | "/audit"
   | "/payroll"
+  | "/promotions"
+  | "/feedback"
   | "/users"
   | "/roles"
   | "/setup"
@@ -65,6 +68,8 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Sales",
     links: [
       { to: "/orders", label: "Sales Orders", permission: "sales.view" },
+      { to: "/promotions", label: "Coupons", permission: "promotions.view" },
+      { to: "/feedback", label: "Purchase feedback", permission: "feedback.view" },
       { to: "/shipments", label: "Shipments" },
       { to: "/returns", label: "Returns" },
     ],
@@ -94,6 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: "/users", label: "Users", permission: "platform.users.manage" },
       { to: "/roles", label: "Roles", permission: "platform.users.manage" },
       { to: "/audit", label: "Audit Log", permission: "audit.log.read" },
+      { to: "/shipping-carriers", label: "Shipping carriers", permission: "delivery.carriers.view" },
       { to: "/setup", label: "Setup", permission: "company.settings.manage" },
       { to: "/settings", label: "Settings", permission: "company.settings.manage" },
     ],

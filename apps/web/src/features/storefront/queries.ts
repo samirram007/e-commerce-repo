@@ -5,11 +5,15 @@ import {
   fetchCart,
   fetchCategories,
   fetchInterests,
+  fetchOrderReturns,
   fetchOrders,
   fetchPaymentMethods,
   fetchPincode,
+  fetchOrderFeedbackState,
   fetchProduct,
+  fetchProductReviews,
   fetchProducts,
+  fetchShippingOptions,
   fetchTrending,
   type ProductFilters,
 } from "./api";
@@ -24,8 +28,12 @@ export const shopKeys = {
   cart: ["shop", "cart"] as const,
   addresses: ["shop", "addresses"] as const,
   orders: ["shop", "orders"] as const,
+  orderReturns: (orderId: string) => ["shop", "order-returns", orderId] as const,
   pincode: (pincode: string) => ["shop", "pincode", pincode] as const,
   paymentMethods: (pincode?: string) => ["shop", "payment-methods", pincode ?? ""] as const,
+  shippingOptions: (pincode?: string) => ["shop", "shipping-options", pincode ?? ""] as const,
+  productReviews: (productId: string) => ["shop", "product-reviews", productId] as const,
+  orderFeedback: (orderId: string) => ["shop", "order-feedback", orderId] as const,
 };
 
 export function categoriesQueryOptions() {
@@ -63,11 +71,24 @@ export function ordersQueryOptions() {
   return queryOptions({ queryKey: shopKeys.orders, queryFn: fetchOrders });
 }
 
-export function pincodeQueryOptions(pincode: string) {
+export function orderReturnsQueryOptions(orderId: string) {
   return queryOptions({
-    queryKey: shopKeys.pincode(pincode),
-    queryFn: () => fetchPincode(pincode),
-    enabled: pincode.trim().length >= 4,
+    queryKey: shopKeys.orderReturns(orderId),
+    queryFn: () => fetchOrderReturns(orderId),
+  });
+}
+
+/** Indian PIN codes are exactly six digits (and never start with 0). */
+export function isValidPincode(pincode: string): boolean {
+  return /^[1-9]\d{5}$/.test(pincode.trim());
+}
+
+export function pincodeQueryOptions(pincode: string) {
+  const normalized = pincode.trim();
+  return queryOptions({
+    queryKey: shopKeys.pincode(normalized),
+    queryFn: () => fetchPincode(normalized),
+    enabled: isValidPincode(normalized),
     staleTime: 5 * 60_000,
   });
 }
@@ -77,5 +98,31 @@ export function paymentMethodsQueryOptions(pincode?: string) {
     queryKey: shopKeys.paymentMethods(pincode),
     queryFn: () => fetchPaymentMethods(pincode),
     staleTime: 60_000,
+  });
+}
+
+export function shippingOptionsQueryOptions(pincode?: string) {
+  return queryOptions({
+    queryKey: shopKeys.shippingOptions(pincode),
+    queryFn: () => fetchShippingOptions(pincode),
+    staleTime: 60_000,
+  });
+}
+
+/** Approved reviews shown on a product page. */
+export function productReviewsQueryOptions(productId: string) {
+  return queryOptions({
+    queryKey: shopKeys.productReviews(productId),
+    queryFn: () => fetchProductReviews(productId),
+    staleTime: 60_000,
+  });
+}
+
+/** Reviewable items + existing feedback for one of the shopper's orders. */
+export function orderFeedbackQueryOptions(orderId: string) {
+  return queryOptions({
+    queryKey: shopKeys.orderFeedback(orderId),
+    queryFn: () => fetchOrderFeedbackState(orderId),
+    enabled: Boolean(orderId),
   });
 }
